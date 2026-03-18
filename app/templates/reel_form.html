@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="panel">
+  <h1>Add tracked reel</h1>
+  <p class="muted">Paste a public reel URL. The app will try to enrich visible metadata and save a first snapshot.</p>
+  <form method="post">
+    <div class="three-col">
+      <div>
+        <label>Reel URL</label>
+        <input name="url" required placeholder="https://www.instagram.com/reel/.../">
+      </div>
+      <div>
+        <label>Source hashtag</label>
+        <input name="source_hashtag" placeholder="fitness">
+      </div>
+      <div>
+        <label>Hashtags</label>
+        <input name="hashtags" placeholder="fitness, growth, gym">
+      </div>
+    </div>
+    <div class="three-col">
+      <div><label>Creator</label><input name="creator"></div>
+      <div><label>Niche</label><input name="niche"></div>
+      <div><label>Hook</label><input name="hook"></div>
+    </div>
+    <div class="three-col">
+      <div><label>CTA</label><input name="cta"></div>
+      <div><label>Format</label><input name="format"></div>
+      <div><label>Notes</label><input name="notes"></div>
+    </div>
+    <div class="three-col">
+      <div><label>Manual views</label><input type="number" name="last_views"></div>
+      <div><label>Manual likes</label><input type="number" name="last_likes"></div>
+      <div><label>Manual comments</label><input type="number" name="last_comments"></div>
+    </div>
+    <button type="submit">Create tracked reel</button>
+  </form>
+</div>
+{% endblock %}

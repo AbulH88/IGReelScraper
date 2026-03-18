@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="content-stack">
+  <div class="panel hero">
+    <div class="split-grid">
+      <div>
+        <div class="badge-row" style="margin-bottom: 14px;">
+          <span class="badge">Tracked reel</span>
+          <span class="badge">Score {{ reel.viral_score or 0 }}</span>
+          <span class="badge">{{ reel.enrichment_status }}</span>
+        </div>
+        <h1 style="font-size: 2.2rem;">{{ reel.title or reel.shortcode or 'Tracked reel' }}</h1>
+        <p class="hero-note">@{{ reel.creator or 'unknown_creator' }} · {{ reel.url }}</p>
+        <div class="inline-actions" style="margin-top: 18px;">
+          <a class="button ghost" href="{{ reel.url }}" target="_blank" rel="noreferrer">Open on Instagram</a>
+          {% if reel.video_url %}
+          <button type="button" class="secondary" onclick="toggleInlinePlayer()">Play inside app</button>
+          {% endif %}
+          <form method="post" action="{{ url_for('main.refresh_one', reel_id=reel.id) }}">
+            <button type="submit">Refresh snapshot</button>
+          </form>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><span class="kpi-label">Views</span><strong>{{ reel.last_views|compact_number }}</strong></div>
+        <div class="stat-card"><span class="kpi-label">Likes</span><strong>{{ reel.last_likes|compact_number }}</strong></div>
+        <div class="stat-card"><span class="kpi-label">Comments</span><strong>{{ reel.last_comments|compact_number }}</strong></div>
+        <div class="stat-card"><span class="kpi-label">Snapshots</span><strong>{{ reel.snapshots|length }}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  {% if reel.video_url %}
+  <div id="inline-player" class="panel" style="display: none;">
+    <div class="section-title">
+      <div>
+        <h2>Inline reel player</h2>
+        <div class="muted small">Native video playback inside the app.</div>
+      </div>
+    </div>
+    <video id="detail-embed-frame" class="embed-frame" controls playsinline preload="metadata" poster="{{ reel.thumbnail_url or '' }}"></video>
+  </div>
+  {% endif %}
+
+  <div class="split-grid">
+    <div class="panel">
+      <h2>Growth timeline</h2>
+      <div class="chart-wrap" style="margin-top: 16px;">
+        <svg id="views-chart" viewBox="0 0 720 260" width="100%" height="260" aria-label="Views chart"></svg>
+        <div class="muted small" style="margin-top: 10px;">This chart is built from snapshots collected after the reel was added to the app.</div>
+      </div>
+      <div class="table-wrap" style="margin-top: 18px;">
+        <table>
+          <thead><tr><th>Captured</th><th>Views</th><th>Likes</th><th>Comments</th></tr></thead>
+          <tbody>
+          {% for snapshot in reel.snapshots %}
+            <tr>
+              <td>{{ snapshot.captured_at.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td>{{ snapshot.views|compact_number }}</td>
+              <td>{{ snapshot.likes|compact_number }}</td>
+              <td>{{ snapshot.comments|compact_number }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">No snapshots yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Edit analysis</h2>
+      <form method="post">
+        <label>Creator</label><input name="creator" value="{{ reel.creator or '' }}">
+        <label>Niche</label><input name="niche" value="{{ reel.niche or '' }}">
+        <label>Hashtags</label><input name="hashtags" value="{{ reel.hashtags or '' }}">
+        <label>Hook</label><input name="hook" value="{{ reel.hook or '' }}">
+        <label>CTA</label><input name="cta" value="{{ reel.cta or '' }}">
+        <label>Format</label><input name="format" value="{{ reel.format or '' }}">
+        <label>Notes</label><textarea name="notes">{{ reel.notes or '' }}</textarea>
+        <div class="three-col">
+          <div><label>Manual views</label><input type="number" name="last_views" value="{{ reel.last_views or '' }}"></div>
+          <div><label>Manual likes</label><input type="number" name="last_likes" value="{{ reel.last_likes or '' }}"></div>
+          <div><label>Manual comments</label><input type="number" name="last_comments" value="{{ reel.last_comments or '' }}"></div>
+        </div>
+        <div class="inline-actions" style="margin-top: 16px;">
+          <button type="submit">Save changes</button>
+        </div>
+      </form>
+      {% if reel.last_error %}
+        <div class="flash flash-warning" style="margin-top: 14px;">Last public fetch issue: {{ reel.last_error }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  const points = {{ chart_points|tojson }};
+  const svg = document.getElementById('views-chart');
+  const width = 720;
+  const height = 260;
+  const pad = 32;
+  const max = Math.max(...points.map(p => p.views), 1);
+
+  if (!points.length) {
+    svg.innerHTML = '<text x="22" y="40" fill="#97a4c6">No snapshots yet.</text>';
+  } else {
+    const coords = points.map((p, idx) => {
+      const x = pad + (idx * ((width - pad * 2) / Math.max(points.length - 1, 1)));
+      const y = height - pad - ((p.views / max) * (height - pad * 2));
+      return `${x},${y}`;
+    }).join(' ');
+    svg.innerHTML = `
+      <line x1="${pad}" y1="${height-pad}" x2="${width-pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.12)" />
+      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.12)" />
+      <polyline fill="none" stroke="#7c5cff" stroke-width="4" points="${coords}" />
+    ` + points.map((p, idx) => {
+      const x = pad + (idx * ((width - pad * 2) / Math.max(points.length - 1, 1)));
+      const y = height - pad - ((p.views / max) * (height - pad * 2));
+      return `<circle cx="${x}" cy="${y}" r="5" fill="#34d6ff"><title>${p.label}: ${p.views} views</title></circle>`;
+    }).join('');
+  }
+
+  function toggleInlinePlayer() {
+    const panel = document.getElementById('inline-player');
+    const frame = document.getElementById('detail-embed-frame');
+    const open = panel.style.display !== 'none';
+    if (open) {
+      panel.style.display = 'none';
+      frame.pause();
+      frame.src = '';
+      return;
+    }
+    panel.style.display = 'block';
+    frame.src = {{ url_for('main.stream_reel_video', reel_id=reel.id)|tojson }};
+    frame.play().catch(() => {});
+  }
+</script>
+{% endblock %}

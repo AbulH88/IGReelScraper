@@ -1,0 +1,331 @@
+{% extends 'base.html' %}
+{% macro render_reel_card(reel) %}
+<article class="card">
+  <div class="reel-thumb">
+    {% if reel.thumbnail_url %}
+      <img src="{{ reel.thumbnail_url }}" alt="{{ reel.title or reel.shortcode or 'Reel thumbnail' }}">
+    {% endif %}
+    <div class="reel-overlay">
+      <div class="badge-row">
+        <span class="badge">{{ reel.source_hashtag or 'manual' }}</span>
+        <span class="badge">Score {{ reel.viral_score or 0 }}</span>
+      </div>
+      <div class="action-row">
+        {% if reel.video_url %}
+        <button
+          type="button"
+          class="secondary"
+          data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
+          data-play-title="{{ reel.title or reel.shortcode or 'Tracked reel' }}"
+          data-play-poster="{{ reel.thumbnail_url or '' }}"
+          onclick="openPreviewFromButton(this)"
+        >
+          Play here
+        </button>
+        {% endif %}
+        <a class="button ghost" href="{{ reel.url }}" target="_blank" rel="noreferrer">Open IG</a>
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div>
+      <h3 class="card-title">{{ reel.title or reel.shortcode or reel.url }}</h3>
+      <div class="card-subtitle">@{{ reel.creator or 'unknown_creator' }} · {{ reel.last_checked_at.strftime('%Y-%m-%d %H:%M') if reel.last_checked_at else 'not refreshed yet' }}</div>
+    </div>
+    <div class="metric-grid">
+      <div class="metric-pill"><span>Views</span><strong>{{ reel.last_views|compact_number }}</strong></div>
+      <div class="metric-pill"><span>Likes</span><strong>{{ reel.last_likes|compact_number }}</strong></div>
+      <div class="metric-pill"><span>Comments</span><strong>{{ reel.last_comments|compact_number }}</strong></div>
+      <div class="metric-pill"><span>Status</span><strong>{{ reel.enrichment_status }}</strong></div>
+    </div>
+    <div class="tag-row">
+      {% for tag in reel.hashtag_list[:5] %}
+        <span class="tag">#{{ tag }}</span>
+      {% endfor %}
+    </div>
+    <div class="inline-actions">
+      <a class="button" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">Open analysis</a>
+      {% if reel.video_url %}
+      <a class="button secondary" href="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}" target="_blank" rel="noreferrer">Open video</a>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% endmacro %}
+{% block content %}
+<div class="content-stack">
+  <div class="panel hero">
+    <div class="hero-grid">
+      <div>
+        <div class="badge-row" style="margin-bottom: 14px;">
+          <span class="badge">Live hashtag discovery</span>
+          <span class="badge">Authenticated Instagram session</span>
+          <span class="badge">In-app reel playback</span>
+        </div>
+        <h1 style="font-size: 2.5rem; margin-bottom: 14px;">Discover reels by hashtag, review them like a media browser, and grow your watchlist.</h1>
+        <p class="hero-note">
+          Search hashtags, import visible reels, play them inside the dashboard, filter by views, and keep loading more results as long as Instagram exposes more pages.
+        </p>
+        {% if not instagram_connected %}
+        <div class="flash flash-warning" style="margin-top: 18px;">
+          Instagram discovery needs an authenticated session. Open <a href="{{ url_for('main.instagram_session') }}">Instagram Login</a> and connect your browser session first.
+        </div>
+        {% endif %}
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="kpi-label">Tracked reels</span>
+          <strong>{{ stats.reel_count }}</strong>
+          <div class="muted small">Saved in your local database</div>
+        </div>
+        <div class="stat-card">
+          <span class="kpi-label">Hashtags</span>
+          <strong>{{ stats.tracked_hashtags }}</strong>
+          <div class="muted small">Tracked across the current view</div>
+        </div>
+        <div class="stat-card">
+          <span class="kpi-label">Average views</span>
+          <strong>{{ stats.avg_views|compact_number }}</strong>
+          <div class="muted small">Latest snapshot average</div>
+        </div>
+        <div class="stat-card">
+          <span class="kpi-label">Highest views</span>
+          <strong>{{ stats.max_views|compact_number }}</strong>
+          <div class="muted small">Best current performer</div>
+        </div>
+        <div class="stat-card">
+          <span class="kpi-label">Playable</span>
+          <strong>{{ stats.playable_reels }}</strong>
+          <div class="muted small">Reels with native proxied playback</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="split-grid">
+    <div class="panel">
+      <div class="section-title">
+        <div>
+          <h2>Search hashtags</h2>
+          <div class="muted small">Search multiple hashtags together and the dashboard will keep each one in its own result container.</div>
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('main.discover') }}">
+        <label for="hashtags">Hashtags</label>
+        <textarea id="hashtags" name="hashtags" placeholder="#fitness, #business, #cooking">{% if active_hashtags %}{{ active_hashtags|join(', ') }}{% endif %}</textarea>
+        <div class="field-note">Tip: search one or a few hashtags at a time for cleaner grouped browsing.</div>
+        <div class="inline-actions" style="margin-top: 16px;">
+          <button type="submit" {% if not instagram_connected %}disabled{% endif %}>Search hashtags</button>
+          <a class="button secondary" href="{{ url_for('main.instagram_session') }}">Manage Instagram session</a>
+        </div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Active result groups</h2>
+      {% set recent_hashtag_query = recent_searches | map(attribute='hashtag') | list %}
+      {% if active_hashtags %}
+      <div class="muted small" style="margin-bottom: 12px;">Only these hashtag containers are shown right now, so older unrelated searches stay hidden.</div>
+      <div class="badge-row" style="margin-bottom: 14px;">
+        {% for hashtag in active_hashtags %}
+          <a
+            class="badge{% if hashtag == selected_hashtag %} active-page{% endif %}"
+            href="{{ url_for('main.dashboard', hashtags=active_hashtags|join(','), active_tag=hashtag, min_views=min_views) }}"
+          >
+            #{{ hashtag }}
+          </a>
+        {% endfor %}
+      </div>
+      <div class="inline-actions">
+        <a class="button secondary" href="{{ url_for('main.dashboard', clear=1) }}">Clear search</a>
+        <a class="button ghost" href="{{ url_for('main.dashboard') }}">Show all saved reels</a>
+      </div>
+      {% elif recent_searches %}
+      <div class="muted small" style="margin-bottom: 12px;">Recent hashtag groups are ready below. Click a tab to open the grouped view immediately.</div>
+      <div class="badge-row" style="margin-bottom: 14px;">
+        {% for state in recent_searches %}
+          <a
+            class="badge{% if state.hashtag == selected_hashtag %} active-page{% endif %}"
+            href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=state.hashtag) }}"
+          >
+            #{{ state.hashtag }}
+          </a>
+        {% endfor %}
+      </div>
+      <div class="inline-actions">
+        <a class="button secondary" href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=recent_searches[0].hashtag) }}">Open grouped view</a>
+      </div>
+      {% else %}
+      <div class="empty-state">Run a hashtag search to open a cleaner grouped view. Each hashtag will get its own container and page controls.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <div>
+        <h2 style="margin-bottom: 6px;">Grouped reel browser</h2>
+        <div class="muted small">Each hashtag stays in its own container so you can compare searches without mixing old results.</div>
+      </div>
+      <div class="inline-actions">
+        <form method="get">
+          {% if active_hashtags %}
+          <input type="hidden" name="hashtags" value="{{ active_hashtags|join(',') }}">
+          {% endif %}
+          <input type="number" name="min_views" value="{{ min_views or '' }}" placeholder="Min views">
+          <button type="submit" class="secondary">Apply filter</button>
+        </form>
+        <form method="post" action="{{ url_for('main.refresh_all') }}">
+          <button type="submit">Refresh all</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="content-stack" style="margin-top: 18px;">
+      {% for group in grouped_reels %}
+      <section class="panel">
+        <div class="toolbar">
+          <div>
+            <h3 style="margin-bottom: 6px;">#{{ group.hashtag }}</h3>
+            <div class="muted small">
+              {% if group.state %}
+                Current page {{ group.state.page }}{% if group.state.more_available %} · more pages available{% else %} · end of visible results{% endif %}
+              {% else %}
+                Imported reels grouped under this hashtag.
+              {% endif %}
+            </div>
+          </div>
+          {% if group.state %}
+          <form method="post" action="{{ url_for('main.discover_more', hashtag=group.hashtag) }}">
+            <input type="hidden" name="active_hashtags" value="{{ active_hashtags|join(',') if active_hashtags else group.hashtag }}">
+            <button type="submit" class="secondary" {% if not group.state.more_available %}disabled{% endif %}>
+              {% if group.state.next_page %}Load page {{ group.state.next_page }}{% else %}No next page{% endif %}
+            </button>
+          </form>
+          {% endif %}
+        </div>
+
+        {% if group.state %}
+        <div class="badge-row" style="margin-top: 10px;">
+          {% for page_number in range(1, group.state.page + 1) %}
+            <span class="badge{% if page_number == group.state.page %} active-page{% endif %}">Page {{ page_number }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="reel-grid" style="margin-top: 18px;">
+          {% for reel in group.reels %}
+            {{ render_reel_card(reel) }}
+          {% else %}
+          <div class="panel empty-state">No reels imported for #{{ group.hashtag }} yet.</div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+
+      {% if not active_hashtags and ungrouped_reels %}
+      <section class="panel">
+        <div class="section-title">
+          <div>
+            <h3>Manual / ungrouped reels</h3>
+            <div class="muted small">These saved reels do not belong to a searched hashtag group.</div>
+          </div>
+        </div>
+        <div class="reel-grid" style="margin-top: 18px;">
+          {% for reel in ungrouped_reels %}
+            {{ render_reel_card(reel) }}
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if clear_view %}
+      <div class="panel empty-state">Search cleared. Pick a hashtag tab or run a new search to show results again.</div>
+      {% elif not grouped_reels and not ungrouped_reels %}
+      <div class="panel empty-state">No reels tracked yet. Run a hashtag search or add a reel manually.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="split-grid">
+    <div class="panel">
+      <h2>Top reels by viral score</h2>
+      <div class="content-stack">
+        {% for reel in top_reels %}
+        <div class="search-chip">
+          <div>
+            <div><strong>{{ reel.title or reel.shortcode or 'Tracked reel' }}</strong></div>
+            <div class="muted small">@{{ reel.creator or 'unknown_creator' }} · {{ reel.last_views|compact_number }} views · score {{ reel.viral_score or 0 }}</div>
+          </div>
+          <a class="button secondary" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">Analyze</a>
+        </div>
+        {% else %}
+        <div class="empty-state">No scored reels yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Usage notes</h2>
+      <div class="content-stack">
+        <div class="stat-card">
+          <strong style="font-size: 1.1rem;">Playback inside the app</strong>
+          <div class="muted small">Use the “Play here” button on each reel card for native video playback inside the app.</div>
+        </div>
+        <div class="stat-card">
+          <strong style="font-size: 1.1rem;">Next page loading</strong>
+          <div class="muted small">Each hashtag container keeps its own `Load page` action, so pagination stays separated by search.</div>
+        </div>
+        <div class="stat-card">
+          <strong style="font-size: 1.1rem;">Filtering</strong>
+          <div class="muted small">Use minimum views to trim noisy results and focus on stronger reels first.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="preview-modal" class="modal" onclick="closePreview(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="section-title" style="margin-bottom: 12px;">
+      <div>
+        <h3 id="preview-title" style="margin-bottom: 4px;">Reel preview</h3>
+        <div class="muted small">Native video playback</div>
+      </div>
+      <button type="button" class="ghost" onclick="closePreview()">Close</button>
+    </div>
+    <video id="preview-frame" class="preview-frame" controls playsinline preload="metadata"></video>
+  </div>
+</div>
+
+<script>
+  const previewModal = document.getElementById('preview-modal');
+  const previewFrame = document.getElementById('preview-frame');
+  const previewTitle = document.getElementById('preview-title');
+
+  function openPreviewFromButton(button) {
+    openPreview(
+      button.dataset.playUrl,
+      button.dataset.playTitle,
+      button.dataset.playPoster
+    );
+  }
+
+  function openPreview(url, title, poster) {
+    previewFrame.src = url;
+    previewFrame.poster = poster || '';
+    previewTitle.textContent = title || 'Reel preview';
+    previewModal.classList.add('open');
+    previewFrame.load();
+    previewFrame.play().catch(() => {});
+  }
+
+  function closePreview(event) {
+    if (event && event.target !== previewModal) {
+      return;
+    }
+    previewFrame.pause();
+    previewFrame.src = '';
+    previewFrame.poster = '';
+    previewModal.classList.remove('open');
+  }
+</script>
+{% endblock %}

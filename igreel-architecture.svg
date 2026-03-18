@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="980" viewBox="0 0 1400 980">
+  <defs>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #172033; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #4b587c; }
+      .label { font: 700 20px Arial, sans-serif; fill: #172033; }
+      .text { font: 400 16px Arial, sans-serif; fill: #26324b; }
+      .small { font: 400 14px Arial, sans-serif; fill: #52607f; }
+      .box { fill: #f8fbff; stroke: #2d6cdf; stroke-width: 2; rx: 18; ry: 18; }
+      .box2 { fill: #f6f3ff; stroke: #7a4ce0; stroke-width: 2; rx: 18; ry: 18; }
+      .box3 { fill: #effbf5; stroke: #1f9d62; stroke-width: 2; rx: 18; ry: 18; }
+      .box4 { fill: #fff7ed; stroke: #dd6b20; stroke-width: 2; rx: 18; ry: 18; }
+      .arrow { stroke: #52607f; stroke-width: 3; fill: none; marker-end: url(#arrowhead); }
+      .dash { stroke-dasharray: 10 8; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#52607f" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="980" fill="#ffffff"/>
+  <text x="60" y="70" class="title">IgReel Snapshot Tracking Architecture</text>
+  <text x="60" y="105" class="subtitle">Local web app for tracking saved public reel URLs, refreshing visible metrics over time, and analyzing growth from collected snapshots.</text>
+
+  <rect x="70" y="170" width="300" height="180" class="box"/>
+  <text x="100" y="215" class="label">1. Browser UI</text>
+  <text x="100" y="250" class="text">- Watchlist and reel library</text>
+  <text x="100" y="280" class="text">- Add/edit tracked reel form</text>
+  <text x="100" y="310" class="text">- Timeline charts and insights</text>
+
+  <rect x="500" y="145" width="390" height="235" class="box2"/>
+  <text x="530" y="190" class="label">2. Flask Web App</text>
+  <text x="530" y="225" class="text">Routes:</text>
+  <text x="560" y="255" class="text">- Dashboard / watchlist</text>
+  <text x="560" y="285" class="text">- Add / edit tracked reel</text>
+  <text x="560" y="315" class="text">- Refresh snapshots</text>
+  <text x="560" y="345" class="text">- Insights / similar content ideas</text>
+
+  <rect x="1020" y="150" width="280" height="220" class="box4"/>
+  <text x="1050" y="195" class="label">3. Public Reel Pages</text>
+  <text x="1050" y="230" class="text">Visible public metadata only</text>
+  <text x="1050" y="265" class="text">- Best-effort fetch</text>
+  <text x="1050" y="295" class="text">- No private audience insights</text>
+  <text x="1050" y="325" class="text">- No video download</text>
+
+  <rect x="460" y="470" width="490" height="270" class="box3"/>
+  <text x="490" y="515" class="label">4. Service Layer</text>
+  <text x="490" y="550" class="text">Metadata Enrichment Service</text>
+  <text x="520" y="580" class="small">Reads public page fields when exposed</text>
+  <text x="490" y="620" class="text">Snapshot Refresh Service</text>
+  <text x="520" y="650" class="small">Re-checks tracked reels and stores visible metrics over time</text>
+  <text x="490" y="690" class="text">Scoring + Analysis Service</text>
+  <text x="520" y="720" class="small">Computes viral score and growth estimates from snapshots</text>
+
+  <rect x="985" y="500" width="330" height="230" class="box"/>
+  <text x="1015" y="545" class="label">5. SQLite Database</text>
+  <text x="1015" y="580" class="text">Stores:</text>
+  <text x="1045" y="610" class="text">- Tracked reel records</text>
+  <text x="1045" y="640" class="text">- Snapshot history by refresh time</text>
+  <text x="1045" y="670" class="text">- Tags, notes, scores, insights</text>
+  <text x="1045" y="700" class="text">- Manual corrections when needed</text>
+
+  <path d="M370 260 L500 260" class="arrow"/>
+  <path d="M890 260 L1020 260" class="arrow dash"/>
+  <path d="M695 380 L695 470" class="arrow"/>
+  <path d="M950 615 L985 615" class="arrow"/>
+  <path d="M1150 500 L1150 390 L890 390" class="arrow"/>
+
+  <rect x="70" y="470" width="300" height="250" class="box4"/>
+  <text x="100" y="515" class="label">User Workflow</text>
+  <text x="100" y="550" class="text">1. Add public reel URLs to watchlist</text>
+  <text x="100" y="585" class="text">2. App fetches visible metadata</text>
+  <text x="100" y="620" class="text">3. User adds tags/notes/filter targets</text>
+  <text x="100" y="655" class="text">4. App refreshes snapshots over time</text>
+  <text x="100" y="690" class="text">5. UI shows score and growth charts</text>
+
+  <path d="M370 595 L460 595" class="arrow"/>
+
+  <rect x="70" y="790" width="1240" height="120" fill="#f7f9fc" stroke="#d7deea" stroke-width="2" rx="18" ry="18"/>
+  <text x="100" y="835" class="label">Reality Boundary</text>
+  <text x="100" y="870" class="text">Charts are built from snapshots collected after tracking starts. Native viewer-country and historical growth data for third-party reels are not assumed available.</text>
+</svg>

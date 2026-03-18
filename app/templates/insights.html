@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="two-col">
+  <div class="panel">
+    <h1>Insights</h1>
+    <p class="muted">These insights come from reels already tracked by the app and their collected snapshots.</p>
+    <h3>Top hashtags in tracked reels</h3>
+    <table>
+      <thead><tr><th>Hashtag</th><th>Count</th></tr></thead>
+      <tbody>
+        {% for tag, count in top_tags %}
+        <tr><td>#{{ tag }}</td><td>{{ count }}</td></tr>
+        {% else %}
+        <tr><td colspan="2" class="muted">No hashtag data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2>Similar content prompts</h2>
+    {% for idea in idea_prompts %}
+      <div class="panel" style="margin-bottom: 10px;">{{ idea }}</div>
+    {% else %}
+      <div class="muted">Save hooks, CTA styles, and formats to generate prompt ideas here.</div>
+    {% endfor %}
+  </div>
+</div>
+<div class="panel">
+  <h2>Best tracked reels</h2>
+  <table>
+    <thead><tr><th>Reel</th><th>Score</th><th>Latest views</th><th>Snapshots</th></tr></thead>
+    <tbody>
+    {% for reel in reels|sort(attribute='viral_score', reverse=true) %}
+      <tr>
+        <td><a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">{{ reel.title or reel.shortcode or reel.url }}</a></td>
+        <td>{{ reel.viral_score or 0 }}</td>
+        <td>{{ reel.last_views or 0 }}</td>
+        <td>{{ reel.snapshots|length }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No reels tracked yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

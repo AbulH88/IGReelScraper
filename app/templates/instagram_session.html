@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="two-col">
+  <div class="panel">
+    <h1>Instagram session connection</h1>
+    <p class="muted">Use this page to connect an Instagram browser session for authenticated hashtag discovery. Do not type your Instagram password into this app.</p>
+    <ol class="muted">
+      <li>Log in to Instagram in your normal browser.</li>
+      <li>Open browser developer tools and inspect cookies for <code>instagram.com</code>.</li>
+      <li>Copy the <code>sessionid</code>. Add <code>csrftoken</code> and <code>ds_user_id</code> too if available.</li>
+      <li>Paste them below and save.</li>
+    </ol>
+    <form method="post">
+      <label>Session ID</label>
+      <textarea name="sessionid" required>{{ session_config.sessionid if session_config and session_config.sessionid else '' }}</textarea>
+      <label>CSRF Token</label>
+      <input name="csrftoken" value="{{ session_config.csrftoken if session_config and session_config.csrftoken else '' }}">
+      <label>DS User ID</label>
+      <input name="ds_user_id" value="{{ session_config.ds_user_id if session_config and session_config.ds_user_id else '' }}">
+      <label>User-Agent override</label>
+      <input name="user_agent" value="{{ session_config.user_agent if session_config and session_config.user_agent else '' }}" placeholder="Optional: paste the same browser user-agent">
+      <button type="submit">Save Instagram session</button>
+    </form>
+    {% if session_config and session_config.is_active %}
+    <form method="post" style="margin-top: 12px;">
+      <input type="hidden" name="action" value="clear">
+      <button type="submit" class="secondary">Disconnect session</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h2>Status</h2>
+    {% if instagram_connected %}
+      <div class="flash flash-success">Instagram session is configured.</div>
+      <div class="muted small">Saved session ID: {{ (session_config.sessionid[:8] ~ '...') if session_config and session_config.sessionid else 'n/a' }}</div>
+      {% if session_config and session_config.updated_at %}
+      <div class="muted small" style="margin-top: 8px;">Updated: {{ session_config.updated_at.strftime('%Y-%m-%d %H:%M') }}</div>
+      {% endif %}
+    {% else %}
+      <div class="flash flash-warning">No active Instagram session saved yet.</div>
+    {% endif %}
+    <p class="muted small">This app stores the session locally in your SQLite database so discovery requests can use authenticated cookies.</p>
+  </div>
+</div>
+{% endblock %}
