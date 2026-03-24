@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import requests
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, stream_with_context, url_for
+import time
+import threading
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, stream_with_context, url_for
 from sqlalchemy import or_
 
-from .models import HashtagSearchState, Reel, db
+from .models import HashtagSearchState, Reel, TaskNotification, db
 from .services import (
     _instagram_cookies,
     _instagram_headers,
     build_chart_points,
     clear_instagram_session,
+    discover_reels_from_creator,
     discover_reels_from_web,
     enrich_reel,
     get_instagram_session,
@@ -183,6 +186,7 @@ def refresh_hashtag_group(hashtag: str):
         try:
             from .services import refresh_reel
             refresh_reel(reel)
+            time.sleep(1.5) # Prevent 429 rate limit
         except:
             pass
     flash(f"Refreshed {len(reels)} reels for #{hashtag}.", "success")
@@ -359,33 +363,111 @@ def stream_reel_video(reel_id: int):
     )
 
 
-@bp.route('/reels/new', methods=['GET', 'POST'])
-def create_reel():
+@bp.route('/creator-search', methods=['GET', 'POST'])
+def creator_search():
     if request.method == 'POST':
-        reel = Reel(
-            url=request.form['url'].strip(),
-            source_hashtag=request.form.get('source_hashtag') or None,
-            creator=request.form.get('creator') or None,
-            niche=request.form.get('niche') or None,
-            hashtags=', '.join(normalize_hashtags(request.form.get('hashtags', ''))),
-            hook=request.form.get('hook') or None,
-            cta=request.form.get('cta') or None,
-            format=request.form.get('format') or None,
-            notes=request.form.get('notes') or None,
-        )
-        db.session.add(reel)
-        db.session.commit()
-        enrich_reel(
-            reel,
-            {
-                'views': _to_int('last_views'),
-                'likes': _to_int('last_likes'),
-                'comments': _to_int('last_comments'),
-            },
-        )
-        flash('Tracked reel created.', 'success')
-        return redirect(url_for('main.reel_detail', reel_id=reel.id))
-    return render_template('reel_form.html', reel=None)
+        username = request.form.get('username', '').strip()
+        limit = request.form.get('limit', type=int) or 50
+        if not username:
+            flash('Enter an Instagram profile URL or username.', 'warning')
+            return redirect(url_for('main.creator_search'))
+        
+        imported, errors, new_reels = discover_reels_from_creator(username, limit=limit)
+        
+        # Clean username for tag
+        clean_username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
+        tag = f"creator:{clean_username}"
+        
+        if new_reels:
+            reel_ids = [r.id for r in new_reels]
+            threading.Thread(target=async_enrich_reels, args=(current_app._get_current_object(), reel_ids, f"@{clean_username}")).start()
+            flash(f'Imported {imported} reels for @{clean_username}. The app is now automatically fetching their data in the background.', 'success')
+        elif imported:
+            flash(f'Imported {imported} reels for @{clean_username}.', 'success')
+        else:
+            flash(f'No new reels were found for @{clean_username}.', 'warning')
+            
+        for error in errors:
+            flash(error, 'danger')
+            
+        return redirect(url_for('main.creator_search', active_creator=clean_username))
+
+    active_creator = request.args.get('active_creator', '')
+    limit = request.args.get('limit', type=int) or 20
+    sort_by = request.args.get('sort_by', 'views_desc')
+    
+    search_query = HashtagSearchState.query.filter(HashtagSearchState.hashtag.startswith('creator:')).order_by(HashtagSearchState.updated_at.desc())
+    recent_searches = search_query.all()
+    
+    # Build detailed stats for the creator list
+    creator_stats_list = []
+    if not active_creator:
+        for state in recent_searches:
+            creator_reels = Reel.query.filter(Reel.source_hashtag == state.hashtag).all()
+            total = len(creator_reels)
+            if total == 0:
+                continue
+            
+            processed = sum(1 for r in creator_reels if r.enrichment_status == 'ok')
+            progress = int((processed / total) * 100)
+            
+            creator_stats_list.append({
+                'username': state.hashtag.replace('creator:', ''),
+                'total_reels': total,
+                'processed_reels': processed,
+                'progress': progress,
+                'total_views': sum((r.last_views or 0) for r in creator_reels),
+                'last_updated': state.updated_at
+            })
+
+    reels = []
+    has_more_local = False
+    stats = {'reel_count': 0, 'processed_reels': 0, 'progress': 0, 'avg_views': 0, 'max_views': 0, 'playable_reels': 0}
+    
+    if active_creator:
+        tag = f"creator:{active_creator}"
+        # Base query for stats (all reels)
+        all_group_reels = Reel.query.filter(Reel.source_hashtag == tag).all()
+        
+        # Only show fully processed reels in the UI
+        query = Reel.query.filter(Reel.source_hashtag == tag, Reel.enrichment_status == 'ok')
+        
+        if sort_by == 'views_desc':
+            query = query.order_by(Reel.last_views.desc().nullslast())
+        elif sort_by == 'views_asc':
+            query = query.order_by(Reel.last_views.asc().nullslast())
+        elif sort_by == 'newest':
+            query = query.order_by(Reel.created_at.desc())
+        elif sort_by == 'oldest':
+            query = query.order_by(Reel.created_at.asc())
+            
+        reels = query.limit(limit).all()
+        has_more_local = query.count() > len(reels)
+        
+        stats['reel_count'] = len(all_group_reels)
+        stats['processed_reels'] = len(query.all())
+        stats['progress'] = int((stats['processed_reels'] / max(stats['reel_count'], 1)) * 100)
+        
+        stats['avg_views'] = int(sum((r.last_views or 0) for r in all_group_reels) / max(len(all_group_reels), 1))
+        stats['max_views'] = max([r.last_views or 0 for r in all_group_reels] or [0])
+        stats['playable_reels'] = sum(1 for r in all_group_reels if r.playable_url)
+
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+        if not state:
+            db.session.add(HashtagSearchState(hashtag=tag))
+            db.session.commit()
+
+    return render_template(
+        'creator_search.html',
+        reels=reels,
+        active_creator=active_creator,
+        recent_searches=recent_searches,
+        creator_stats_list=creator_stats_list,
+        stats=stats,
+        limit=limit,
+        sort_by=sort_by,
+        has_more_local=has_more_local
+    )
 
 
 @bp.route('/reels/<int:reel_id>', methods=['GET', 'POST'])
@@ -452,6 +534,47 @@ def insights():
     return render_template('insights.html', reels=reels, top_tags=top_tags, idea_prompts=idea_prompts)
 
 
+def async_enrich_reels(app, reel_ids, keyword):
+    with app.app_context():
+        from .models import db, Reel, TaskNotification
+        from .services import refresh_reel
+        success_count = 0
+        for rid in reel_ids:
+            reel = db.session.get(Reel, rid)
+            if reel and reel.enrichment_status != 'ok':
+                try:
+                    refresh_reel(reel)
+                    success_count += 1
+                    # Pause to avoid Instagram 429 Too Many Requests
+                    time.sleep(2.5)
+                except Exception:
+                    pass
+        
+        # Create a notification when finished
+        notif = TaskNotification(
+            message=f"Background fetch complete for '{keyword}'. {success_count} reels analyzed.",
+            action_url=url_for('main.web_search', active_keyword=keyword)
+        )
+        db.session.add(notif)
+        db.session.commit()
+
+@bp.route('/api/notifications')
+def get_notifications():
+    notifications = TaskNotification.query.filter_by(is_read=False).order_by(TaskNotification.created_at.asc()).all()
+    results = []
+    for notif in notifications:
+        results.append({
+            'id': notif.id,
+            'message': notif.message,
+            'action_url': notif.action_url
+        })
+        notif.is_read = True
+    
+    if notifications:
+        db.session.commit()
+        
+    return jsonify(results)
+
 @bp.route('/web-search', methods=['GET', 'POST'])
 def web_search():
     if request.method == 'POST':
@@ -461,9 +584,15 @@ def web_search():
             flash('Enter a keyword to search.', 'warning')
             return redirect(url_for('main.web_search'))
         
-        imported, errors = discover_reels_from_web(keyword, limit=limit)
-        if imported:
-            flash(f'Imported {imported} reel URLs from web search. Click "Refresh" on them to pull stats from IG.', 'success')
+        imported, errors, new_reels = discover_reels_from_web(keyword, limit=limit)
+        
+        if new_reels:
+            # Kick off automatic enrichment in the background
+            reel_ids = [r.id for r in new_reels]
+            threading.Thread(target=async_enrich_reels, args=(current_app._get_current_object(), reel_ids, keyword)).start()
+            flash(f'Imported {imported} URLs. The app is now automatically fetching their data in the background (we will notify you when it is complete).', 'success')
+        elif imported:
+            flash(f'Imported {imported} reel URLs from web search.', 'success')
         else:
             flash('No new reels were imported from the web search.', 'warning')
             

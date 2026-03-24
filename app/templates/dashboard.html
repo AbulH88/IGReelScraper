@@ -201,9 +201,8 @@
             </div>
             <div class="px-4 pb-3">
               <div class="inline-actions">
-                <a class="btn-beautiful" href="{{ url_for('main.create_reel') }}">Add reel</a>
-                {% if active_hashtags %}
-                <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', clear=1) }}">Clear search</a>
+                <a class="btn-beautiful" href="{{ url_for('main.creator_search') }}">Creator Search</a>
+                {% if active_hashtags %}                <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', clear=1) }}">Clear search</a>
                 {% elif recent_searches %}
                 {% set recent_hashtag_query = recent_searches | map(attribute='hashtag') | list %}
                 <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=recent_searches[0].hashtag) }}">Open grouped view</a>

@@ -118,13 +118,13 @@ def test_discover_more_uses_saved_page_state():
     client = app.test_client()
     with app.app_context():
         services.save_instagram_session('session-value', 'csrf-value', '1234')
-        routes.db.session.add(HashtagSearchState(hashtag='fitness', page=1, next_page=2, more_available=True))
+        routes.db.session.add(HashtagSearchState(hashtag='fitness', page=1, next_max_id='abc_123', more_available=True))
         routes.db.session.commit()
 
     original = services._instagram_api_get
 
     def fake_api(url, **_kwargs):
-        if 'page=2' in url:
+        if 'max_id=abc_123' in url:
             return {
                 'status': 'ok',
                 'data': {
@@ -163,9 +163,8 @@ def test_discover_more_uses_saved_page_state():
         reel = Reel.query.one()
         assert reel.url.endswith('/PAGE2/')
         assert reel.last_views == 120000
-        assert reel.discovery_page == 2
         state = HashtagSearchState.query.filter_by(hashtag='fitness').one()
-        assert state.page == 2
+        assert state.next_max_id is None
 
 
 def test_dashboard_shows_saved_search_state():
@@ -232,37 +231,6 @@ def test_dashboard_tab_switches_visible_group():
     assert b'Fitness Tab Reel' not in response.data
 
 
-def test_dashboard_only_shows_current_page_reels_for_selected_hashtag():
-    app = make_app()
-    client = app.test_client()
-    with app.app_context():
-        routes.db.session.add_all(
-            [
-                Reel(
-                    url='https://www.instagram.com/reel/fit-page-one/',
-                    shortcode='fit-page-one',
-                    source_hashtag='fitness',
-                    discovery_page=1,
-                    title='Fitness Page One',
-                ),
-                Reel(
-                    url='https://www.instagram.com/reel/fit-page-two/',
-                    shortcode='fit-page-two',
-                    source_hashtag='fitness',
-                    discovery_page=2,
-                    title='Fitness Page Two',
-                ),
-            ]
-        )
-        routes.db.session.add(HashtagSearchState(hashtag='fitness', page=2, next_page=3, more_available=True))
-        routes.db.session.commit()
-    response = client.get('/?hashtags=fitness&active_tag=fitness')
-    assert response.status_code == 200
-    assert b'Fitness Page Two' in response.data
-    assert b'Fitness Page One' not in response.data
-    assert b'Next page 3' in response.data
-
-
 def test_clear_search_hides_reel_results():
     app = make_app()
     client = app.test_client()
@@ -316,34 +284,3 @@ def test_stream_route_uses_proxy_video():
     routes.requests.get = original_get
     assert response.status_code == 200
     assert response.data == b'test'
-
-
-def test_manual_reel_creation():
-    app = make_app()
-    client = app.test_client()
-
-    class DummyResponse:
-        text = '<html><head><meta property="og:title" content="Test Creator on Instagram: &quot;Example&quot;" /></head><body>1,000 views 100 likes 10 comments</body></html>'
-
-    def fake_public_get(_url):
-        return DummyResponse()
-
-    original = services._public_get
-    services._public_get = fake_public_get
-    response = client.post(
-        '/reels/new',
-        data={
-            'url': 'https://www.instagram.com/reel/test-one/',
-            'hashtags': 'fitness, growth',
-            'last_views': '1000',
-            'last_likes': '100',
-            'last_comments': '10',
-        },
-        follow_redirects=True,
-    )
-    services._public_get = original
-    assert response.status_code == 200
-    with app.app_context():
-        reel = Reel.query.one()
-        assert reel.last_views == 1000
-        assert reel.snapshots[0].views == 1000

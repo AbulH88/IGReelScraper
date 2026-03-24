@@ -1,0 +1,44 @@
++ set -euo pipefail
++++ dirname start.sh
+++ cd .
+++ pwd
++ SCRIPT_DIR=/home/jimi/Documents/APP/IgReel
++ cd /home/jimi/Documents/APP/IgReel
++ [[ ! -d .venv ]]
++ source .venv/bin/activate
+++ deactivate nondestructive
+++ '[' -n '' ']'
+++ '[' -n '' ']'
+++ hash -r
+++ '[' -n '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ '[' linux-gnu = cygwin ']'
+++ '[' linux-gnu = msys ']'
+++ export VIRTUAL_ENV=/home/jimi/Documents/APP/IgReel/.venv
+++ VIRTUAL_ENV=/home/jimi/Documents/APP/IgReel/.venv
+++ _OLD_VIRTUAL_PATH=/home/jimi/.nvm/versions/node/v24.11.1/bin:/home/jimi/.pyenv/shims:/home/jimi/.pyenv/bin:/home/jimi/.pyenv/versions/miniconda3-3.12-24.11.1-0/condabin:/usr/local/sbin:/usr/local/bin:/usr/bin:/opt/cuda/bin:/home/jimi/.local/share/flatpak/exports/bin:/var/lib/flatpak/exports/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/var/lib/snapd/snap/bin:/home/jimi/.local/bin
+++ PATH=/home/jimi/Documents/APP/IgReel/.venv/bin:/home/jimi/.nvm/versions/node/v24.11.1/bin:/home/jimi/.pyenv/shims:/home/jimi/.pyenv/bin:/home/jimi/.pyenv/versions/miniconda3-3.12-24.11.1-0/condabin:/usr/local/sbin:/usr/local/bin:/usr/bin:/opt/cuda/bin:/home/jimi/.local/share/flatpak/exports/bin:/var/lib/flatpak/exports/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/var/lib/snapd/snap/bin:/home/jimi/.local/bin
+++ export PATH
+++ '[' -n '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(.venv) '
+++ export PS1
+++ VIRTUAL_ENV_PROMPT='(.venv) '
+++ export VIRTUAL_ENV_PROMPT
+++ hash -r
++ HOST=127.0.0.1
++ PORT_WAS_SET=
++ PORT=5000
++ python - 127.0.0.1 5000
++ echo 'Starting IGReelScraper at http://127.0.0.1:5000'
+Starting IGReelScraper at http://127.0.0.1:5000
++ python -
+ * Serving Flask app 'app'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat

@@ -91,3 +91,11 @@ class HashtagSearchState(db.Model):
     next_max_id = db.Column(db.Text)
     more_available = db.Column(db.Boolean, default=False, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class TaskNotification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message = db.Column(db.String(255), nullable=False)
+    action_url = db.Column(db.String(500))
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)

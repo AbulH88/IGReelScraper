@@ -444,12 +444,66 @@
 
   </style>
 </head>
-<body>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px;"></div>
+
   <script>
     (function() {
       if (localStorage.getItem('theme') === 'dark') {
         document.body.classList.add('dark-theme');
       }
+
+      // Notification Polling System
+      function showToast(message, actionUrl) {
+        const toast = document.createElement('div');
+        toast.style.cssText = 'background: var(--accent-gradient); color: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-weight: 600; display: flex; flex-direction: column; gap: 8px; animation: slideIn 0.3s ease-out; min-width: 250px; cursor: pointer;';
+        
+        toast.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 14px;"><i class="fa fa-bell mr-2"></i> ${message}</span>
+            <i class="fa fa-times ml-3" style="cursor: pointer; opacity: 0.7;" onclick="event.stopPropagation(); this.parentElement.parentElement.remove();"></i>
+          </div>
+          ${actionUrl ? `<div style="font-size: 12px; opacity: 0.9;"><i class="fa fa-arrow-right mr-1"></i> Click to view results</div>` : ''}
+        `;
+        
+        if (actionUrl) {
+          toast.onclick = function() {
+            window.location.href = actionUrl;
+          };
+        }
+        
+        document.getElementById('toast-container').appendChild(toast);
+        
+        // Auto remove after 10 seconds
+        setTimeout(() => {
+          if (document.body.contains(toast)) {
+            toast.style.animation = 'slideOut 0.3s ease-in forwards';
+            setTimeout(() => toast.remove(), 300);
+          }
+        }, 10000);
+      }
+
+      function pollNotifications() {
+        fetch('/api/notifications')
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.length > 0) {
+              data.forEach(notif => showToast(notif.message, notif.action_url));
+            }
+          })
+          .catch(err => console.error("Error polling notifications:", err));
+      }
+
+      // Add simple animations to the page
+      const style = document.createElement('style');
+      style.innerHTML = `
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+      `;
+      document.head.appendChild(style);
+
+      // Poll every 5 seconds
+      setInterval(pollNotifications, 5000);
     })();
   </script>
   <div id="preloader">
@@ -513,7 +567,7 @@
           <li><a href="{{ url_for('main.dashboard') }}"><i class="icon-speedometer menu-icon"></i><span class="nav-text">Dashboard</span></a></li>
           <li><a href="{{ url_for('main.web_search') }}"><i class="icon-globe menu-icon"></i><span class="nav-text">Web Search</span></a></li>
           <li><a href="{{ url_for('main.insights') }}"><i class="icon-graph menu-icon"></i><span class="nav-text">Insights</span></a></li>
-          <li><a href="{{ url_for('main.create_reel') }}"><i class="icon-note menu-icon"></i><span class="nav-text">Add Reel</span></a></li>
+          <li><a href="{{ url_for('main.creator_search') }}"><i class="icon-user menu-icon"></i><span class="nav-text">Creator Search</span></a></li>
           <li><a href="{{ url_for('main.instagram_session') }}"><i class="icon-lock menu-icon"></i><span class="nav-text">Instagram Session</span></a></li>
           <li><a href="{{ url_for('main.library') }}"><i class="icon-layers menu-icon"></i><span class="nav-text">Search Library</span></a></li>
         </ul>

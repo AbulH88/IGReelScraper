@@ -256,7 +256,17 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple
 def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
     payload = manual_metrics or {}
     try:
-        response = _public_get(reel.url)
+        session_config = get_instagram_session()
+        headers = _instagram_headers(session_config, referer=reel.url) if session_config and session_config.is_active else {
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        cookies = _instagram_cookies(session_config) if session_config and session_config.is_active else {}
+        
+        # Bypassing the basic _public_get to use auth cookies if available
+        response = requests.get(reel.url, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
 
@@ -540,18 +550,23 @@ def refresh_all_reels() -> tuple[int, list[str]]:
     return refreshed, errors
 
 
-def discover_reels_from_web(keyword: str, limit: int = 50) -> tuple[int, list[str]]:
+def discover_reels_from_creator(username: str, limit: int = 50) -> tuple[int, list[str], list[Reel]]:
     errors = []
     imported = 0
-    query = f'site:instagram.com/reel/ "{keyword}"'
-    tag = f"web:{keyword}"
+    new_reels = []
+    
+    # Clean username
+    username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
+    
+    query = f'site:instagram.com/reel/ "{username}"'
+    tag = f"creator:{username}"
     
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=limit))
     except Exception as exc:
-        errors.append(f"Web search failed: {exc}")
-        return 0, errors
+        errors.append(f"Creator search failed: {exc}")
+        return 0, errors, []
 
     for item in results:
         url = item.get('href')
@@ -562,13 +577,31 @@ def discover_reels_from_web(keyword: str, limit: int = 50) -> tuple[int, list[st
         if not full_url.endswith('/'):
             full_url += '/'
             
+        # Try to parse initial likes/comments from DuckDuckGo snippet
+        body = item.get('body', '')
+        likes_match = re.search(r'([\d.,]+[KMBkmb]?)\s+likes', body, re.I)
+        comments_match = re.search(r'([\d.,]+[KMBkmb]?)\s+comments', body, re.I)
+        
+        initial_likes = parse_metric(likes_match.group(1)) if likes_match else None
+        initial_comments = parse_metric(comments_match.group(1)) if comments_match else None
+        
         existing = Reel.query.filter_by(url=full_url).first()
         if existing:
             if tag not in existing.hashtag_list:
                 merged = existing.hashtag_list + [tag]
                 existing.hashtags = ", ".join(dict.fromkeys(merged))
                 existing.source_hashtag = existing.source_hashtag or tag
+                
+                if initial_likes and not existing.last_likes:
+                    existing.last_likes = initial_likes
+                if initial_comments and not existing.last_comments:
+                    existing.last_comments = initial_comments
+                
+                if not existing.creator:
+                    existing.creator = username
+
                 db.session.add(existing)
+                new_reels.append(existing)
             continue
             
         reel = Reel(
@@ -576,11 +609,82 @@ def discover_reels_from_web(keyword: str, limit: int = 50) -> tuple[int, list[st
             url=full_url,
             shortcode=shortcode_from_url(full_url),
             hashtags=tag,
+            title=item.get('title'),
+            creator=username,
             enrichment_status="pending",
         )
+        if initial_likes or initial_comments:
+            apply_metrics(reel, None, initial_likes, initial_comments)
+            
         db.session.add(reel)
+        new_reels.append(reel)
         imported += 1
         
     db.session.commit()
-    return imported, errors
+    return imported, errors, new_reels
+
+def discover_reels_from_web(keyword: str, limit: int = 50) -> tuple[int, list[str], list[Reel]]:
+    errors = []
+    imported = 0
+    new_reels = []
+    query = f'site:instagram.com/reel/ "{keyword}"'
+    tag = f"web:{keyword}"
+    
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=limit))
+    except Exception as exc:
+        errors.append(f"Web search failed: {exc}")
+        return 0, errors, []
+
+    for item in results:
+        url = item.get('href')
+        if not url or '/reel/' not in url:
+            continue
+        
+        full_url = url.split("?")[0]
+        if not full_url.endswith('/'):
+            full_url += '/'
+            
+        # Try to parse initial likes/comments from DuckDuckGo snippet
+        body = item.get('body', '')
+        likes_match = re.search(r'([\d.,]+[KMBkmb]?)\s+likes', body, re.I)
+        comments_match = re.search(r'([\d.,]+[KMBkmb]?)\s+comments', body, re.I)
+        
+        initial_likes = parse_metric(likes_match.group(1)) if likes_match else None
+        initial_comments = parse_metric(comments_match.group(1)) if comments_match else None
+        
+        existing = Reel.query.filter_by(url=full_url).first()
+        if existing:
+            if tag not in existing.hashtag_list:
+                merged = existing.hashtag_list + [tag]
+                existing.hashtags = ", ".join(dict.fromkeys(merged))
+                existing.source_hashtag = existing.source_hashtag or tag
+                
+                if initial_likes and not existing.last_likes:
+                    existing.last_likes = initial_likes
+                if initial_comments and not existing.last_comments:
+                    existing.last_comments = initial_comments
+                
+                db.session.add(existing)
+                new_reels.append(existing)
+            continue
+            
+        reel = Reel(
+            source_hashtag=tag,
+            url=full_url,
+            shortcode=shortcode_from_url(full_url),
+            hashtags=tag,
+            title=item.get('title'),
+            enrichment_status="pending",
+        )
+        if initial_likes or initial_comments:
+            apply_metrics(reel, None, initial_likes, initial_comments)
+            
+        db.session.add(reel)
+        new_reels.append(reel)
+        imported += 1
+        
+    db.session.commit()
+    return imported, errors, new_reels
 

@@ -78,3 +78,17 @@ def _ensure_schema_updates():
         if "next_max_id" not in columns:
             with db.engine.begin() as connection:
                 connection.exec_driver_sql("ALTER TABLE hashtag_search_state ADD COLUMN next_max_id TEXT")
+
+    if "task_notification" not in table_names:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE task_notification (
+                    id INTEGER PRIMARY KEY,
+                    message VARCHAR(255) NOT NULL,
+                    action_url VARCHAR(500),
+                    is_read BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
