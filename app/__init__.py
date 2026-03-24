@@ -55,6 +55,9 @@ def _ensure_schema_updates():
     if "video_url" not in columns:
         with db.engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN video_url TEXT")
+    if "discovery_page" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN discovery_page INTEGER")
     if "hashtag_search_state" not in table_names:
         with db.engine.begin() as connection:
             connection.exec_driver_sql(
@@ -64,8 +67,14 @@ def _ensure_schema_updates():
                     hashtag VARCHAR(120) NOT NULL UNIQUE,
                     page INTEGER NOT NULL DEFAULT 1,
                     next_page INTEGER,
+                    next_max_id TEXT,
                     more_available BOOLEAN NOT NULL DEFAULT 0,
                     updated_at DATETIME NOT NULL
                 )
                 """
             )
+    else:
+        columns = {column["name"] for column in inspector.get_columns("hashtag_search_state")}
+        if "next_max_id" not in columns:
+            with db.engine.begin() as connection:
+                connection.exec_driver_sql("ALTER TABLE hashtag_search_state ADD COLUMN next_max_id TEXT")

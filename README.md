@@ -40,6 +40,8 @@ Default URL:
 http://127.0.0.1:5000
 ```
 
+If port `5000` is already busy, the script automatically moves to the next free port and prints the URL.
+
 Optional custom port:
 
 ```bash
@@ -70,4 +72,3 @@ pytest -q
 - `tests/` test suite
 - `start.sh` local startup script
 - `instance/` local SQLite database files
-

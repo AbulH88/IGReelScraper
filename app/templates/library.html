@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h4 class="card-title">Search Library</h4>
+                <p class="text-muted">History of all hashtags you have discovered. Click a hashtag to open it in the dashboard.</p>
+                
+                <div class="table-responsive">
+                    <table class="table table-striped table-bordered zero-configuration">
+                        <thead>
+                            <tr>
+                                <th>Hashtag</th>
+                                <th>Reels Saved</th>
+                                <th>Last Discovered</th>
+                                <th>Has More on IG</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for state in search_states %}
+                            <tr>
+                                <td>
+                                    {% if state.hashtag.startswith('web:') %}
+                                    <a href="{{ url_for('main.web_search', active_keyword=state.hashtag[4:]) }}" class="font-weight-bold" style="color: var(--accent-secondary);">
+                                        <i class="fa fa-globe"></i> {{ state.hashtag[4:] }}
+                                    </a>
+                                    {% else %}
+                                    <a href="{{ url_for('main.dashboard', hashtags=state.hashtag, active_tag=state.hashtag) }}" class="font-weight-bold" style="color: var(--accent-primary);">
+                                        #{{ state.hashtag }}
+                                    </a>
+                                    {% endif %}
+                                </td>
+                                <td>{{ counts[state.hashtag] }}</td>
+                                <td>{{ state.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    {% if state.more_available %}
+                                    <span class="badge badge-success">Yes</span>
+                                    {% else %}
+                                    <span class="badge badge-light">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="d-flex">
+                                        {% if state.hashtag.startswith('web:') %}
+                                        <a href="{{ url_for('main.web_search', active_keyword=state.hashtag[4:]) }}" class="btn-beautiful-ghost btn-sm mr-2">
+                                            <i class="fa fa-eye"></i> View
+                                        </a>
+                                        {% else %}
+                                        <a href="{{ url_for('main.dashboard', hashtags=state.hashtag, active_tag=state.hashtag) }}" class="btn-beautiful-ghost btn-sm mr-2">
+                                            <i class="fa fa-eye"></i> View
+                                        </a>
+                                        {% endif %}
+
+                                        <form method="post" action="{{ url_for('main.refresh_hashtag_group', hashtag=state.hashtag) }}">
+                                            <button type="submit" class="btn-beautiful-secondary btn-sm mr-2" title="Refresh All">
+                                                <i class="fa fa-refresh"></i>
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{{ url_for('main.delete_hashtag_group', hashtag=state.hashtag) }}">
+                                            <button type="submit" class="btn-beautiful btn-sm" style="background: #dc2626 !important; box-shadow: none !important;" onclick="return confirm('Delete #{{ state.hashtag }} and ALL {{ counts[state.hashtag] }} reels? This cannot be undone.')" title="Delete Group">
+                                                <i class="fa fa-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">No searches saved in library yet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -19,12 +19,12 @@
       <input name="ds_user_id" value="{{ session_config.ds_user_id if session_config and session_config.ds_user_id else '' }}">
       <label>User-Agent override</label>
       <input name="user_agent" value="{{ session_config.user_agent if session_config and session_config.user_agent else '' }}" placeholder="Optional: paste the same browser user-agent">
-      <button type="submit">Save Instagram session</button>
+      <button type="submit" class="btn-beautiful mt-3">Save Instagram session</button>
     </form>
     {% if session_config and session_config.is_active %}
     <form method="post" style="margin-top: 12px;">
       <input type="hidden" name="action" value="clear">
-      <button type="submit" class="secondary">Disconnect session</button>
+      <button type="submit" class="btn-beautiful-ghost">Disconnect session</button>
     </form>
     {% endif %}
   </div>

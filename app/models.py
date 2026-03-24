@@ -12,6 +12,7 @@ def utcnow():
 class Reel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     source_hashtag = db.Column(db.String(120), index=True)
+    discovery_page = db.Column(db.Integer, default=1)
     url = db.Column(db.String(500), unique=True, nullable=False)
     shortcode = db.Column(db.String(120), index=True)
     thumbnail_url = db.Column(db.Text)
@@ -87,5 +88,6 @@ class HashtagSearchState(db.Model):
     hashtag = db.Column(db.String(120), unique=True, nullable=False, index=True)
     page = db.Column(db.Integer, default=1, nullable=False)
     next_page = db.Column(db.Integer)
+    next_max_id = db.Column(db.Text)
     more_available = db.Column(db.Boolean, default=False, nullable=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

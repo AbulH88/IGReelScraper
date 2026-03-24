@@ -2,286 +2,538 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>IgReel Tracker</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ReelScope Pro</title>
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='quixlab/images/favicon.png') }}">
+  <meta name="referrer" content="no-referrer">
+  <link href="{{ url_for('static', filename='quixlab/css/style.css') }}" rel="stylesheet">
+  <!-- Professional Fonts & Icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <style>
     :root {
-      --bg: #0b1020;
-      --bg-soft: #121936;
-      --surface: rgba(15, 23, 42, 0.78);
-      --surface-solid: #11192f;
-      --surface-light: #ffffff;
-      --text: #e6ecff;
-      --text-soft: #97a4c6;
-      --primary: #7c5cff;
-      --primary-2: #34d6ff;
-      --success: #19c37d;
-      --warning: #ffb648;
-      --danger: #ff6b81;
-      --border: rgba(255, 255, 255, 0.08);
-      --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      /* Modern Vibrant Light Theme */
+      --bg-main: #f0f2f5;
+      --bg-card: #ffffff;
+      --bg-sidebar: #ffffff;
+      --accent-primary: #ff3040; /* Instagram Red-ish */
+      --accent-secondary: #f55376;
+      --accent-gradient: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+      --text-main: #1c1e21;
+      --text-main-rgb: 28, 30, 33;
+      --text-secondary: #65676b; 
+      --text-muted: #8c939d;
+      --border-color: #ebedf0;
+      --glass-bg: rgba(255, 255, 255, 0.85);
+      --card-shadow: 0 12px 28px 0 rgba(0, 0, 0, 0.06), 0 2px 4px 0 rgba(0, 0, 0, 0.05);
     }
-    * { box-sizing: border-box; }
+
+    body.dark-theme {
+      /* Premium Dark Mode */
+      --bg-main: #000000;
+      --bg-card: #121212;
+      --bg-sidebar: #000000;
+      --accent-primary: #ff3040;
+      --accent-secondary: #f55376;
+      --text-main: #f5f6f7;
+      --text-main-rgb: 245, 246, 247;
+      --text-secondary: #b0b3b8;
+      --text-muted: #8a8d91;
+      --border-color: #242526;
+      --glass-bg: rgba(18, 18, 18, 0.85);
+      --card-shadow: 0 12px 28px 0 rgba(0, 0, 0, 0.5), 0 2px 4px 0 rgba(0, 0, 0, 0.2);
+    }
+
     body {
-      margin: 0;
-      font-family: Inter, Arial, sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.25), transparent 28%),
-        radial-gradient(circle at top right, rgba(52, 214, 255, 0.16), transparent 22%),
-        linear-gradient(180deg, #09101f 0%, #0b1020 100%);
-      min-height: 100vh;
+      background-color: var(--bg-main) !important;
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      transition: background-color 0.3s ease, color 0.3s ease;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
-    a { color: #cfd7ff; text-decoration: none; }
-    .page-shell { width: min(1380px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 44px; }
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      backdrop-filter: blur(18px);
-      background: rgba(9, 16, 31, 0.75);
-      border-bottom: 1px solid var(--border);
+
+    h1, h2, h3, h4, h5, h6, strong {
+      color: var(--text-main) !important;
+      font-weight: 700;
+      letter-spacing: -0.02em;
     }
-    .topbar-inner {
-      width: min(1380px, calc(100% - 32px));
-      margin: 0 auto;
+
+    .text-muted, .muted, .small {
+      color: var(--text-muted) !important;
+    }
+
+    #main-wrapper {
+      background: var(--bg-main);
+    }
+
+    /* --- Navigation Header & Logo --- */
+    .nav-header {
+      background: var(--bg-sidebar) !important;
+      border-right: 1px solid var(--border-color);
+      width: 18rem !important;
+      transition: all 0.3s ease;
+    }
+
+    .nav-header .brand-logo a {
+      background: transparent !important;
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      gap: 16px;
-      padding: 18px 0;
+      padding: 1.5rem 1.5rem !important;
+      text-decoration: none !important;
     }
-    .brand { display: flex; align-items: center; gap: 14px; }
-    .brand-badge {
-      width: 44px; height: 44px; border-radius: 14px;
-      background: linear-gradient(135deg, var(--primary), var(--primary-2));
-      box-shadow: 0 12px 32px rgba(124, 92, 255, 0.45);
-    }
-    .brand-copy strong { display: block; font-size: 1rem; }
-    .brand-copy span { color: var(--text-soft); font-size: 0.88rem; }
-    .nav-links { display: flex; gap: 10px; flex-wrap: wrap; }
-    .nav-links a {
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .nav-links a:hover { background: rgba(255, 255, 255, 0.08); }
-    .content-stack { display: grid; gap: 20px; }
-    .panel, .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 24px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(12px);
-    }
-    .panel { padding: 24px; }
-    .panel-light {
-      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(244,247,255,0.92));
-      color: #16213c;
-      border: 1px solid rgba(19, 31, 58, 0.08);
-      box-shadow: 0 18px 50px rgba(7, 13, 28, 0.12);
-    }
-    .hero {
-      position: relative;
-      overflow: hidden;
-      padding: 30px;
-      background:
-        radial-gradient(circle at 0% 0%, rgba(124, 92, 255, 0.28), transparent 34%),
-        radial-gradient(circle at 100% 0%, rgba(52, 214, 255, 0.18), transparent 26%),
-        linear-gradient(135deg, rgba(17, 25, 47, 0.96), rgba(11, 16, 32, 0.92));
-    }
-    .hero h1, .panel h1, .panel h2, .panel h3 { margin-top: 0; }
-    .hero p, .muted { color: var(--text-soft); }
-    .hero-grid, .split-grid, .three-col, .stats-grid, .reel-grid { display: grid; gap: 18px; }
-    .hero-grid { grid-template-columns: 1.4fr 0.9fr; align-items: stretch; }
-    .split-grid { grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr); }
-    .three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .stats-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-    .reel-grid { grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
-    .stat-card {
-      padding: 18px;
-      border-radius: 20px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-    }
-    .stat-card strong { display: block; font-size: 1.8rem; margin-bottom: 6px; }
-    .card {
-      overflow: hidden;
+
+    .logo-vibe {
+      width: 36px;
+      height: 36px;
+      background: var(--accent-gradient);
+      border-radius: 12px;
+      margin-right: 14px;
       display: flex;
-      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 15px rgba(220, 39, 67, 0.3);
     }
-    .reel-thumb {
-      position: relative;
-      aspect-ratio: 9 / 16;
-      background: linear-gradient(180deg, rgba(18, 25, 54, 0.7), rgba(11, 16, 32, 0.92));
-      overflow: hidden;
+
+    .logo-vibe i { color: #fff; font-size: 1.1rem; }
+
+    .brand-title-text {
+      color: var(--text-main) !important;
+      font-size: 1.4rem !important;
+      font-weight: 800 !important;
+      letter-spacing: -0.04em;
     }
-    .reel-thumb img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
+
+    /* --- Top Header --- */
+    .header {
+      background: var(--glass-bg) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-color);
+      left: 18rem !important;
     }
-    .reel-overlay {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(4, 8, 18, 0.12), rgba(4, 8, 18, 0.78));
+
+    .header-content {
+      padding-left: 2rem !important;
+      padding-right: 2rem !important;
+    }
+
+    .theme-toggle {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
       display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 16px;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      margin-right: 1.5rem;
+      box-shadow: var(--card-shadow);
     }
-    .badge-row, .tag-row, .action-row, .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .badge, .tag {
+
+    .theme-toggle:hover {
+      border-color: var(--accent-primary);
+      color: var(--accent-primary);
+      transform: rotate(15deg);
+    }
+
+    .theme-toggle i { font-size: 1.2rem; }
+    .theme-toggle .icon-sun { display: none; }
+    body.dark-theme .theme-toggle .icon-sun { display: block; }
+    body.dark-theme .theme-toggle .icon-moon { display: none; }
+
+    /* --- Sidebar --- */
+    .nk-sidebar {
+      background: var(--bg-sidebar) !important;
+      border-right: 1px solid var(--border-color);
+      width: 18rem !important;
+    }
+
+    .nk-sidebar .metismenu a {
+      color: var(--text-secondary) !important;
+      font-weight: 600;
+      padding: 0.85rem 1.5rem !important;
+      border-radius: 12px;
+      margin: 0.2rem 1rem;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+    }
+
+    .nk-sidebar .metismenu li.active > a,
+    .nk-sidebar .metismenu a:hover {
+      background: rgba(var(--text-main-rgb), 0.05) !important;
+      color: var(--accent-primary) !important;
+    }
+
+    .nk-sidebar .metismenu .menu-icon {
+      margin-right: 14px;
+      font-size: 1.2rem;
+      width: 24px;
+      text-align: center;
+      transition: color 0.3s ease;
+    }
+
+    .nk-sidebar .metismenu li.active > a .menu-icon,
+    .nk-sidebar .metismenu a:hover .menu-icon {
+      color: var(--accent-primary);
+    }
+
+    /* --- Specific Components --- */
+    .group-chip {
+      background: var(--bg-card) !important;
+      border: 1px solid var(--border-color) !important;
+      color: var(--text-secondary) !important;
+      padding: 0.6rem 1.4rem !important;
+      border-radius: 100px !important;
+      font-weight: 700 !important;
+      margin-right: 0.75rem;
+      margin-bottom: 0.75rem;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 0.82rem;
-      border: 1px solid rgba(255,255,255,0.12);
+      text-decoration: none !important;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     }
-    .badge { background: rgba(11, 16, 32, 0.62); color: #fff; }
-    .badge.active-page {
-      background: linear-gradient(135deg, rgba(124, 92, 255, 0.92), rgba(52, 214, 255, 0.72));
-      border-color: transparent;
-      box-shadow: 0 10px 24px rgba(124, 92, 255, 0.26);
+
+    .group-chip:hover {
+      border-color: var(--accent-primary);
+      color: var(--accent-primary) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
-    .tag { background: rgba(124, 92, 255, 0.14); color: #d9d2ff; }
-    .card-body { padding: 18px 18px 20px; display: grid; gap: 14px; }
-    .card-title { font-size: 1.02rem; line-height: 1.4; color: #fff; margin: 0; }
-    .card-subtitle { color: var(--text-soft); font-size: 0.9rem; }
-    .metric-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .metric-pill {
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.07);
+
+    .group-chip.active {
+      background: var(--accent-gradient) !important;
+      color: #fff !important;
+      border-color: transparent !important;
+      box-shadow: 0 4px 15px rgba(220, 39, 67, 0.3) !important;
     }
-    .metric-pill span { display: block; color: var(--text-soft); font-size: 0.78rem; margin-bottom: 4px; }
-    .metric-pill strong { font-size: 1.02rem; }
-    .button, button {
-      appearance: none;
-      border: 0;
-      color: white;
-      cursor: pointer;
-      padding: 11px 16px;
-      border-radius: 14px;
-      font-weight: 600;
-      background: linear-gradient(135deg, var(--primary), #5b93ff);
-      box-shadow: 0 10px 24px rgba(92, 122, 255, 0.32);
+
+    .badge {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.75rem;
+      background: rgba(var(--text-main-rgb), 0.05);
+      color: var(--text-main);
     }
-    button.secondary, .button.secondary {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.1);
-      box-shadow: none;
-      color: var(--text);
+
+    /* --- Cards & Panels --- */
+    .card, .panel {
+      background: var(--bg-card) !important;
+      border: 1px solid var(--border-color) !important;
+      border-radius: 20px !important;
+      box-shadow: var(--card-shadow) !important;
+      transition: all 0.3s ease;
     }
-    button.ghost, .button.ghost {
+
+    .card-title { color: var(--text-main) !important; font-weight: 700 !important; }
+
+    /* --- Tables --- */
+    .table thead th {
       background: transparent;
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: none;
-      color: var(--text);
+      border-bottom: 1px solid var(--border-color) !important;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
     }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-    input, textarea, select {
+    
+    .table td {
+      border-bottom: 1px solid var(--border-color) !important;
+      color: var(--text-secondary);
+      vertical-align: middle !important;
+    }
+
+    /* --- Forms --- */
+    input[type="text"], input[type="number"], input[type="url"], textarea {
+      background: var(--bg-main) !important;
+      border: 1px solid var(--border-color) !important;
+      color: var(--text-main) !important;
+      padding: 0.8rem 1.2rem !important;
+      border-radius: 12px !important;
+      font-weight: 500;
+    }
+
+    input:focus, textarea:focus {
+      border-color: var(--accent-primary) !important;
+      box-shadow: 0 0 0 4px rgba(255, 48, 64, 0.1) !important;
+    }
+
+    /* --- Buttons --- */
+    .btn-beautiful {
+      background: var(--accent-gradient) !important;
+      color: #fff !important;
+      border: none !important;
+      font-weight: 700 !important;
+      border-radius: 12px !important;
+      padding: 0.8rem 1.6rem !important;
+      transition: all 0.3s ease !important;
+      box-shadow: 0 4px 15px rgba(220, 39, 67, 0.25) !important;
+    }
+    
+    .btn-beautiful:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(220, 39, 67, 0.35) !important;
+      filter: brightness(1.1);
+    }
+    
+    .btn-beautiful-ghost {
+      background: var(--bg-card) !important;
+      border: 1px solid var(--border-color) !important;
+      color: var(--text-main) !important;
+      font-weight: 700 !important;
+      border-radius: 12px !important;
+      padding: 0.8rem 1.6rem !important;
+      transition: all 0.3s ease !important;
+    }
+    
+    .btn-beautiful-ghost:hover {
+      background: var(--bg-main) !important;
+      border-color: var(--text-muted) !important;
+    }
+
+    .btn-beautiful-secondary {
+        background: rgba(var(--text-main-rgb), 0.08) !important;
+        color: var(--text-main) !important;
+        border: none !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        padding: 0.8rem 1.6rem !important;
+    }
+
+    /* --- Preview Modal --- */
+    #preview-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
       width: 100%;
-      padding: 13px 14px;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.04);
-      color: var(--text);
-      outline: none;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    textarea { min-height: 112px; resize: vertical; }
-    label { display: block; font-weight: 600; margin: 0 0 8px; }
-    .field-note { margin-top: 8px; font-size: 0.84rem; color: var(--text-soft); }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .toolbar form, .toolbar .inline-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .flash {
-      padding: 14px 16px;
-      border-radius: 16px;
-      margin-bottom: 12px;
-      border: 1px solid rgba(255,255,255,0.08);
+
+    #preview-modal.open {
+      opacity: 1;
+      pointer-events: auto;
     }
-    .flash-success { background: rgba(25, 195, 125, 0.16); color: #a6ffd3; }
-    .flash-warning { background: rgba(255, 182, 72, 0.16); color: #ffe0a8; }
-    .flash-danger { background: rgba(255, 107, 129, 0.18); color: #ffd2da; }
-    .empty-state { padding: 26px; text-align: center; color: var(--text-soft); }
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td {
-      padding: 14px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
-      text-align: left;
-      vertical-align: top;
-    }
-    .muted strong { color: var(--text); }
-    .search-chip {
-      display: flex; align-items: center; justify-content: space-between; gap: 14px;
-      padding: 14px 16px; border-radius: 18px;
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-    }
-    .embed-frame, .preview-frame {
-      width: 100%;
-      border: 0;
-      border-radius: 18px;
-      background: #0d1427;
-    }
-    .embed-frame { min-height: 640px; }
-    .preview-frame { min-height: 680px; }
-    .modal {
-      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-      background: rgba(3, 7, 18, 0.78); z-index: 100;
-      padding: 24px;
-    }
-    .modal.open { display: flex; }
+
     .modal-card {
-      width: min(440px, 100%);
-      background: #09101f;
-      border-radius: 24px;
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: var(--shadow);
-      padding: 18px;
+      width: 90%;
+      max-width: 500px;
+      transform: scale(0.9);
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
-    .section-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-    .small { font-size: 0.88rem; }
-    .kpi-label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.76rem; color: var(--text-soft); }
-    .hero-note { max-width: 740px; }
-    @media (max-width: 980px) {
-      .hero-grid, .split-grid, .three-col { grid-template-columns: 1fr; }
-      .embed-frame, .preview-frame { min-height: 520px; }
+
+    #preview-modal.open .modal-card {
+      transform: scale(1);
+    }
+
+    .preview-frame {
+      width: 100%;
+      aspect-ratio: 9/16;
+      background: #000;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    }
+
+    /* --- Grid View --- */
+    .reel-box-card {
+      border-radius: 20px !important;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .reel-box-card:hover {
+      transform: translateY(-8px);
+    }
+
+    .reel-thumb-overlay {
+      background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 60%) !important;
+    }
+
+    .reelscope-banner {
+      background: var(--accent-gradient) !important;
+      border: none !important;
+    }
+    .reelscope-banner strong, .reelscope-banner .small { color: #fff !important; }
+
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg-main); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; border: 3px solid var(--bg-main); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    @media (max-width: 991px) {
+      .nk-sidebar, .nav-header { width: 5rem !important; }
+      .content-body, .header { margin-left: 5rem !important; left: 5rem !important; }
+      .brand-title-text { display: none; }
+    }
+
+    .alert {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      border-radius: 12px;
+    }
+
+    .alert-success { background: rgba(34, 197, 94, 0.1) !important; color: #4ade80 !important; border-color: rgba(34, 197, 94, 0.2) !important; }
+    .alert-warning { background: rgba(234, 179, 8, 0.1) !important; color: #fde047 !important; border-color: rgba(234, 179, 8, 0.2) !important; }
+    .alert-danger { background: rgba(239, 68, 68, 0.1) !important; color: #f87171 !important; border-color: rgba(239, 68, 68, 0.2) !important; }
+
+    .reelscope-banner {
+      background: var(--accent-gradient) !important;
+      border: none !important;
+    }
+    .reelscope-banner strong, .reelscope-banner .small { color: #fff !important; }
+
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg-main); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; border: 3px solid var(--bg-main); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    @media (max-width: 991px) {
+      .nk-sidebar, .nav-header { width: 5rem !important; }
+      .content-body, .header { margin-left: 5rem !important; left: 5rem !important; }
+      .brand-title-text { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-badge"></div>
-        <div class="brand-copy">
-          <strong>IgReel Tracker</strong>
-          <span>Instagram hashtag discovery, playback, and trend tracking</span>
+  <script>
+    (function() {
+      if (localStorage.getItem('theme') === 'dark') {
+        document.body.classList.add('dark-theme');
+      }
+    })();
+  </script>
+  <div id="preloader">
+    <div class="loader">
+      <svg class="circular" viewBox="25 25 50 50">
+        <circle class="path" cx="50" cy="50" r="20" fill="none" stroke-width="3" stroke-miterlimit="10" />
+      </svg>
+    </div>
+  </div>
+
+  <div id="main-wrapper">
+    <div class="nav-header">
+      <div class="brand-logo">
+        <a href="{{ url_for('main.dashboard') }}">
+          <div class="logo-vibe">
+            <i class="fa fa-play"></i>
+          </div>
+          <span class="brand-title-text">ReelScope Pro</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="header">
+      <div class="header-content clearfix">
+        <div class="nav-control">
+          <div class="hamburger">
+            <span class="toggle-icon"><i class="fa fa-bars"></i></span>
+          </div>
+        </div>
+        <div class="header-left">
+          <div class="input-group icons">
+            <div class="input-group-prepend">
+              <span class="input-group-text bg-transparent border-0 pr-2 pr-sm-3" style="color: var(--text-muted);"><i class="fa fa-search"></i></span>
+            </div>
+            <input type="text" class="form-control" value="Discovery Dashboard" readonly>
+          </div>
+        </div>
+        <div class="header-right">
+          <ul class="clearfix" style="display: flex; align-items: center;">
+            <li class="icons dropdown">
+              <div class="theme-toggle" id="theme-toggle" title="Toggle Mode">
+                <i class="fa fa-moon-o icon-moon"></i>
+                <i class="fa fa-sun-o icon-sun"></i>
+              </div>
+            </li>
+            <li class="icons dropdown">
+              <div class="user-img c-pointer position-relative">
+                <span class="activity active" style="background: #22c55e;"></span>
+                <img src="{{ url_for('static', filename='quixlab/images/user/1.png') }}" height="40" width="40" alt="" style="border-radius: 10px; border: 2px solid var(--border-color);">
+              </div>
+            </li>
+          </ul>
         </div>
       </div>
-      <div class="nav-links">
-        <a href="{{ url_for('main.dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('main.instagram_session') }}">Instagram Login</a>
-        <a href="{{ url_for('main.create_reel') }}">Add Reel</a>
-        <a href="{{ url_for('main.insights') }}">Insights</a>
+    </div>
+
+    <div class="nk-sidebar">
+      <div class="nk-nav-scroll">
+        <ul class="metismenu" id="menu">
+          <li class="nav-label">Workspace</li>
+          <li><a href="{{ url_for('main.dashboard') }}"><i class="icon-speedometer menu-icon"></i><span class="nav-text">Dashboard</span></a></li>
+          <li><a href="{{ url_for('main.web_search') }}"><i class="icon-globe menu-icon"></i><span class="nav-text">Web Search</span></a></li>
+          <li><a href="{{ url_for('main.insights') }}"><i class="icon-graph menu-icon"></i><span class="nav-text">Insights</span></a></li>
+          <li><a href="{{ url_for('main.create_reel') }}"><i class="icon-note menu-icon"></i><span class="nav-text">Add Reel</span></a></li>
+          <li><a href="{{ url_for('main.instagram_session') }}"><i class="icon-lock menu-icon"></i><span class="nav-text">Instagram Session</span></a></li>
+          <li><a href="{{ url_for('main.library') }}"><i class="icon-layers menu-icon"></i><span class="nav-text">Search Library</span></a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="content-body">
+      <div class="container-fluid mt-3">
+        <div class="card reelscope-banner">
+          <div class="card-body d-flex flex-wrap justify-content-between align-items-center">
+            <div>
+              <strong>Search first, review one hashtag group at a time</strong>
+              <div class="small" style="color: rgba(255,255,255,0.8);">Results stay focused on the active hashtag instead of auto-showing older saved batches.</div>
+            </div>
+            <div class="small" style="font-weight: 600;">ReelScope Studio</div>
+          </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ 'warning' if category == 'danger' else category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="close" data-dismiss="alert"><span>&times;</span></button>
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
       </div>
     </div>
   </div>
-  <div class="page-shell">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="flash flash-{{ category }}">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-  </div>
+
+  <script src="{{ url_for('static', filename='quixlab/plugins/common/common.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='quixlab/js/custom.min.js') }}"></script>
+  <script>
+    (function() {
+      const toggle = document.getElementById('theme-toggle');
+      const body = document.body;
+      const theme = localStorage.getItem('theme');
+
+      if (theme === 'dark') {
+        body.classList.add('dark-theme');
+      }
+
+      toggle.addEventListener('click', () => {
+        body.classList.toggle('dark-theme');
+        if (body.classList.contains('dark-theme')) {
+          localStorage.setItem('theme', 'dark');
+        } else {
+          localStorage.setItem('theme', 'light');
+        }
+      });
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

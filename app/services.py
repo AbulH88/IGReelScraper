@@ -8,6 +8,7 @@ from urllib.parse import quote_plus, urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from ddgs import DDGS
 from .models import InstagramSession, Reel, ReelSnapshot, db
 
 USER_AGENT = (
@@ -27,7 +28,8 @@ def normalize_hashtags(raw: str) -> list[str]:
     seen = set()
     tags = []
     for part in re.split(r"[\s,]+", raw or ""):
-        cleaned = part.strip().lstrip("#").lower()
+        # Remove all special characters (keep letters, numbers, underscores)
+        cleaned = re.sub(r"[^\w]", "", part.lower())
         if cleaned and cleaned not in seen:
             seen.add(cleaned)
             tags.append(cleaned)
@@ -191,13 +193,17 @@ def clear_instagram_session() -> None:
     db.session.commit()
 
 
-def discover_reels_for_hashtag(hashtag: str, page: int = 1) -> tuple[list[dict], dict]:
+def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple[list[dict], dict]:
     if has_instagram_session():
+        path = f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name={quote_plus(hashtag)}"
+        if max_id:
+            path += f"&max_id={quote_plus(max_id)}"
+            
         payload = _instagram_api_get(
-            f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name={quote_plus(hashtag)}&page={page}",
+            path,
             referer=f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/",
         )
-        results, pagination = _extract_reels_from_tag_payload(payload, hashtag, page)
+        results, pagination = _extract_reels_from_tag_payload(payload, hashtag)
         if results:
             return results, pagination
 
@@ -263,13 +269,22 @@ def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
         og_video = soup.find("meta", attrs={"property": "og:video:secure_url"}) or soup.find(
             "meta", attrs={"property": "og:video"}
         )
+        og_image = (
+            soup.find("meta", attrs={"property": "og:image:secure_url"}) or 
+            soup.find("meta", attrs={"property": "og:image"}) or
+            soup.find("meta", attrs={"name": "twitter:image"})
+        )
 
         reel.shortcode = reel.shortcode or shortcode_from_url(reel.url)
         reel.title = reel.title or title
         reel.caption = reel.caption or description_text
         reel.creator = reel.creator or _extract_creator(title)
+        
+        # Always update video and thumbnail if we found fresh ones, as they expire
         if og_video and og_video.get("content"):
-            reel.video_url = reel.video_url or og_video.get("content")
+            reel.video_url = og_video.get("content")
+        if og_image and og_image.get("content"):
+            reel.thumbnail_url = og_image.get("content")
 
         metrics = extract_metrics_from_html(html, description_text)
         views = payload.get("views") if payload.get("views") is not None else metrics.get("views")
@@ -366,68 +381,84 @@ def apply_metrics(reel: Reel, views: int | None, likes: int | None, comments: in
     return reel
 
 
-def import_discovered_reels(hashtags: list[str], page_by_tag: dict[str, int] | None = None) -> tuple[int, list[str], dict[str, dict]]:
-    imported = 0
+def import_discovered_reels(hashtags: list[str], max_id_by_tag: dict[str, str] | None = None, depth: int = 1) -> tuple[int, list[str], dict[str, dict]]:
+    total_imported = 0
     errors = []
     search_state = {}
     for tag in hashtags:
-        try:
-            requested_page = (page_by_tag or {}).get(tag, 1)
-            discovered, pagination = discover_reels_for_hashtag(tag, page=requested_page)
-        except (requests.RequestException, InstagramLoginRequiredError) as exc:
-            errors.append(f"#{tag}: {exc}")
-            continue
-        search_state[tag] = pagination
-        for item in discovered:
-            url = item["url"]
-            existing = Reel.query.filter_by(url=url).first()
-            if existing:
-                existing.source_hashtag = existing.source_hashtag or tag
-                if tag not in existing.hashtag_list:
-                    merged = existing.hashtag_list + [tag]
-                    existing.hashtags = ", ".join(dict.fromkeys(merged))
-                if item.get("creator") and not existing.creator:
-                    existing.creator = item["creator"]
-                if item.get("title") and not existing.title:
-                    existing.title = item["title"]
-                if item.get("caption") and not existing.caption:
-                    existing.caption = item["caption"]
-                if item.get("thumbnail_url") and not existing.thumbnail_url:
-                    existing.thumbnail_url = item["thumbnail_url"]
-                if item.get("video_url") and not existing.video_url:
-                    existing.video_url = item["video_url"]
-                db.session.add(existing)
-                apply_metrics(existing, item.get("views"), item.get("likes"), item.get("comments"))
-                continue
-            reel = Reel(
-                source_hashtag=tag,
-                url=url,
-                shortcode=shortcode_from_url(url),
-                hashtags=tag,
-                thumbnail_url=item.get("thumbnail_url"),
-                video_url=item.get("video_url"),
-                creator=item.get("creator"),
-                title=item.get("title"),
-                caption=item.get("caption"),
-                enrichment_status="pending",
-            )
-            db.session.add(reel)
-            apply_metrics(reel, item.get("views"), item.get("likes"), item.get("comments"))
-            imported += 1
-        db.session.commit()
-    return imported, errors, search_state
+        current_max_id = (max_id_by_tag or {}).get(tag)
+        for d in range(depth):
+            try:
+                discovered, pagination = discover_reels_for_hashtag(tag, max_id=current_max_id)
+            except (requests.RequestException, InstagramLoginRequiredError) as exc:
+                errors.append(f"#{tag} (page {d+1}): {exc}")
+                break
+            
+            search_state[tag] = pagination
+            page_imported = 0
+            for item in discovered:
+                url = item["url"]
+                existing = Reel.query.filter_by(url=url).first()
+                if existing:
+                    existing.source_hashtag = existing.source_hashtag or tag
+                    if tag not in existing.hashtag_list:
+                        merged = existing.hashtag_list + [tag]
+                        existing.hashtags = ", ".join(dict.fromkeys(merged))
+                    
+                    # Always refresh these as they expire
+                    if item.get("thumbnail_url"):
+                        existing.thumbnail_url = item["thumbnail_url"]
+                    if item.get("video_url"):
+                        existing.video_url = item["video_url"]
+                    
+                    db.session.add(existing)
+                    apply_metrics(existing, item.get("views"), item.get("likes"), item.get("comments"))
+                    continue
+                
+                reel = Reel(
+                    source_hashtag=tag,
+                    url=url,
+                    shortcode=shortcode_from_url(url),
+                    hashtags=tag,
+                    thumbnail_url=item.get("thumbnail_url"),
+                    video_url=item.get("video_url"),
+                    creator=item.get("creator"),
+                    title=item.get("title"),
+                    caption=item.get("caption"),
+                    enrichment_status="pending",
+                )
+                db.session.add(reel)
+                apply_metrics(reel, item.get("views"), item.get("likes"), item.get("comments"))
+                page_imported += 1
+            
+            total_imported += page_imported
+            db.session.commit()
+            
+            current_max_id = pagination.get("next_max_id")
+            if not pagination.get("more_available") or not current_max_id:
+                break
+                
+    return total_imported, errors, search_state
 
 
-def _extract_reels_from_tag_payload(payload: dict, hashtag: str, page: int) -> tuple[list[dict], dict]:
+def _extract_reels_from_tag_payload(payload: dict, hashtag: str) -> tuple[list[dict], dict]:
     data = payload.get("data", {})
     candidates = []
     seen = set()
+    
+    # Instagram often puts next_max_id in different locations depending on the endpoint
+    next_max_id = data.get("next_max_id")
+    more_available = bool(data.get("more_available"))
+    
+    # Try alternate location if not found
     top_section = data.get("top", {}) or {}
-    next_page = page + 1 if top_section.get("more_available") else None
+    if not next_max_id:
+        next_max_id = top_section.get("next_max_id")
+        more_available = more_available or bool(top_section.get("more_available"))
+    
     pagination = {
-        "page": page,
-        "next_page": next_page,
-        "more_available": bool(top_section.get("more_available")),
+        "next_max_id": next_max_id,
+        "more_available": more_available,
     }
 
     for bucket in ("top", "recent"):
@@ -507,3 +538,49 @@ def refresh_all_reels() -> tuple[int, list[str]]:
             errors.append(f"{reel.url}: {exc}")
             db.session.rollback()
     return refreshed, errors
+
+
+def discover_reels_from_web(keyword: str, limit: int = 50) -> tuple[int, list[str]]:
+    errors = []
+    imported = 0
+    query = f'site:instagram.com/reel/ "{keyword}"'
+    tag = f"web:{keyword}"
+    
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=limit))
+    except Exception as exc:
+        errors.append(f"Web search failed: {exc}")
+        return 0, errors
+
+    for item in results:
+        url = item.get('href')
+        if not url or '/reel/' not in url:
+            continue
+        
+        full_url = url.split("?")[0]
+        if not full_url.endswith('/'):
+            full_url += '/'
+            
+        existing = Reel.query.filter_by(url=full_url).first()
+        if existing:
+            if tag not in existing.hashtag_list:
+                merged = existing.hashtag_list + [tag]
+                existing.hashtags = ", ".join(dict.fromkeys(merged))
+                existing.source_hashtag = existing.source_hashtag or tag
+                db.session.add(existing)
+            continue
+            
+        reel = Reel(
+            source_hashtag=tag,
+            url=full_url,
+            shortcode=shortcode_from_url(full_url),
+            hashtags=tag,
+            enrichment_status="pending",
+        )
+        db.session.add(reel)
+        imported += 1
+        
+    db.session.commit()
+    return imported, errors
+

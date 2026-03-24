@@ -20,7 +20,7 @@ def test_dashboard_renders():
     client = app.test_client()
     response = client.get('/')
     assert response.status_code == 200
-    assert b'Discover reels by hashtag' in response.data
+    assert b'Start with a hashtag search' in response.data
 
 
 def test_instagram_session_can_be_saved():
@@ -163,6 +163,7 @@ def test_discover_more_uses_saved_page_state():
         reel = Reel.query.one()
         assert reel.url.endswith('/PAGE2/')
         assert reel.last_views == 120000
+        assert reel.discovery_page == 2
         state = HashtagSearchState.query.filter_by(hashtag='fitness').one()
         assert state.page == 2
 
@@ -175,10 +176,7 @@ def test_dashboard_shows_saved_search_state():
         routes.db.session.commit()
     response = client.get('/')
     assert response.status_code == 200
-    assert b'Current page 2' in response.data
-    assert b'Load page 3' in response.data
-    assert b'Page 1' in response.data
-    assert b'Page 2' in response.data
+    assert b'Older search groups are saved' in response.data
     assert b'Open grouped view' in response.data
 
 
@@ -234,6 +232,37 @@ def test_dashboard_tab_switches_visible_group():
     assert b'Fitness Tab Reel' not in response.data
 
 
+def test_dashboard_only_shows_current_page_reels_for_selected_hashtag():
+    app = make_app()
+    client = app.test_client()
+    with app.app_context():
+        routes.db.session.add_all(
+            [
+                Reel(
+                    url='https://www.instagram.com/reel/fit-page-one/',
+                    shortcode='fit-page-one',
+                    source_hashtag='fitness',
+                    discovery_page=1,
+                    title='Fitness Page One',
+                ),
+                Reel(
+                    url='https://www.instagram.com/reel/fit-page-two/',
+                    shortcode='fit-page-two',
+                    source_hashtag='fitness',
+                    discovery_page=2,
+                    title='Fitness Page Two',
+                ),
+            ]
+        )
+        routes.db.session.add(HashtagSearchState(hashtag='fitness', page=2, next_page=3, more_available=True))
+        routes.db.session.commit()
+    response = client.get('/?hashtags=fitness&active_tag=fitness')
+    assert response.status_code == 200
+    assert b'Fitness Page Two' in response.data
+    assert b'Fitness Page One' not in response.data
+    assert b'Next page 3' in response.data
+
+
 def test_clear_search_hides_reel_results():
     app = make_app()
     client = app.test_client()
@@ -256,7 +285,7 @@ def test_dashboard_bootstraps_state_from_existing_reels():
         routes.db.session.commit()
     response = client.get('/')
     assert response.status_code == 200
-    assert b'Load page 2' in response.data
+    assert b'Open grouped view' in response.data
     with app.app_context():
         state = HashtagSearchState.query.filter_by(hashtag='egirl').one()
         assert state.page == 1

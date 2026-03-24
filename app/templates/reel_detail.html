@@ -1,31 +1,31 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="content-stack">
-  <div class="panel hero">
+  <div class="panel hero" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(15, 23, 42, 1)) !important; border: 1px solid rgba(139, 92, 246, 0.2) !important;">
     <div class="split-grid">
       <div>
         <div class="badge-row" style="margin-bottom: 14px;">
-          <span class="badge">Tracked reel</span>
+          <span class="badge" style="background: var(--accent-primary); color: #fff;">Tracked reel</span>
           <span class="badge">Score {{ reel.viral_score or 0 }}</span>
           <span class="badge">{{ reel.enrichment_status }}</span>
         </div>
-        <h1 style="font-size: 2.2rem;">{{ reel.title or reel.shortcode or 'Tracked reel' }}</h1>
-        <p class="hero-note">@{{ reel.creator or 'unknown_creator' }} · {{ reel.url }}</p>
-        <div class="inline-actions" style="margin-top: 18px;">
-          <a class="button ghost" href="{{ reel.url }}" target="_blank" rel="noreferrer">Open on Instagram</a>
+        <h1 style="font-size: 2.2rem; color: #fff;">{{ reel.title or reel.shortcode or 'Tracked reel' }}</h1>
+        <p class="hero-note" style="color: var(--text-muted);">@{{ reel.creator or 'unknown_creator' }} · {{ reel.url }}</p>
+        <div class="inline-actions" style="margin-top: 24px;">
+          <a class="btn-beautiful-ghost" href="{{ reel.url }}" target="_blank" rel="noreferrer">Open on Instagram</a>
           {% if reel.video_url %}
-          <button type="button" class="secondary" onclick="toggleInlinePlayer()">Play inside app</button>
+          <button type="button" class="btn-beautiful-secondary" onclick="toggleInlinePlayer()">Play inside app</button>
           {% endif %}
           <form method="post" action="{{ url_for('main.refresh_one', reel_id=reel.id) }}">
-            <button type="submit">Refresh snapshot</button>
+            <button type="submit" class="btn-beautiful">Refresh snapshot</button>
           </form>
         </div>
       </div>
       <div class="stats-grid">
-        <div class="stat-card"><span class="kpi-label">Views</span><strong>{{ reel.last_views|compact_number }}</strong></div>
-        <div class="stat-card"><span class="kpi-label">Likes</span><strong>{{ reel.last_likes|compact_number }}</strong></div>
-        <div class="stat-card"><span class="kpi-label">Comments</span><strong>{{ reel.last_comments|compact_number }}</strong></div>
-        <div class="stat-card"><span class="kpi-label">Snapshots</span><strong>{{ reel.snapshots|length }}</strong></div>
+        <div class="stat-card" style="background: rgba(var(--text-main-rgb), 0.03); border: 1px solid var(--border-color);"><span class="kpi-label" style="color: var(--text-muted);">Views</span><strong style="color: var(--text-main);">{{ reel.last_views|compact_number }}</strong></div>
+        <div class="stat-card" style="background: rgba(var(--text-main-rgb), 0.03); border: 1px solid var(--border-color);"><span class="kpi-label" style="color: var(--text-muted);">Likes</span><strong style="color: var(--text-main);">{{ reel.last_likes|compact_number }}</strong></div>
+        <div class="stat-card" style="background: rgba(var(--text-main-rgb), 0.03); border: 1px solid var(--border-color);"><span class="kpi-label" style="color: var(--text-muted);">Comments</span><strong style="color: var(--text-main);">{{ reel.last_comments|compact_number }}</strong></div>
+        <div class="stat-card" style="background: rgba(var(--text-main-rgb), 0.03); border: 1px solid var(--border-color);"><span class="kpi-label" style="color: var(--text-muted);">Snapshots</span><strong style="color: var(--text-main);">{{ reel.snapshots|length }}</strong></div>
       </div>
     </div>
   </div>
@@ -49,8 +49,8 @@
         <svg id="views-chart" viewBox="0 0 720 260" width="100%" height="260" aria-label="Views chart"></svg>
         <div class="muted small" style="margin-top: 10px;">This chart is built from snapshots collected after the reel was added to the app.</div>
       </div>
-      <div class="table-wrap" style="margin-top: 18px;">
-        <table>
+      <div class="table-responsive mt-4">
+        <table class="table table-xs mb-0">
           <thead><tr><th>Captured</th><th>Views</th><th>Likes</th><th>Comments</th></tr></thead>
           <tbody>
           {% for snapshot in reel.snapshots %}
@@ -61,7 +61,7 @@
               <td>{{ snapshot.comments|compact_number }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="muted">No snapshots yet.</td></tr>
+            <tr><td colspan="4" class="muted text-center py-4">No snapshots yet.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -84,7 +84,7 @@
           <div><label>Manual comments</label><input type="number" name="last_comments" value="{{ reel.last_comments or '' }}"></div>
         </div>
         <div class="inline-actions" style="margin-top: 16px;">
-          <button type="submit">Save changes</button>
+          <button type="submit" class="btn-beautiful">Save changes</button>
         </div>
       </form>
       {% if reel.last_error %}
@@ -111,13 +111,13 @@
       return `${x},${y}`;
     }).join(' ');
     svg.innerHTML = `
-      <line x1="${pad}" y1="${height-pad}" x2="${width-pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.12)" />
-      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.12)" />
-      <polyline fill="none" stroke="#7c5cff" stroke-width="4" points="${coords}" />
+      <line x1="${pad}" y1="${height-pad}" x2="${width-pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.05)" />
+      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height-pad}" stroke="rgba(255,255,255,0.05)" />
+      <polyline fill="none" stroke="#d946ef" stroke-width="4" stroke-linecap="round" points="${coords}" style="filter: drop-shadow(0 0 8px rgba(217, 70, 239, 0.4))" />
     ` + points.map((p, idx) => {
       const x = pad + (idx * ((width - pad * 2) / Math.max(points.length - 1, 1)));
       const y = height - pad - ((p.views / max) * (height - pad * 2));
-      return `<circle cx="${x}" cy="${y}" r="5" fill="#34d6ff"><title>${p.label}: ${p.views} views</title></circle>`;
+      return `<circle cx="${x}" cy="${y}" r="5" fill="#22d3ee" style="filter: drop-shadow(0 0 4px #22d3ee)"><title>${p.label}: ${p.views} views</title></circle>`;
     }).join('');
   }
 
