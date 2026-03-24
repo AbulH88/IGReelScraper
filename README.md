@@ -91,7 +91,8 @@ Once the app gets past the login wall and loads the Reel's webpage, it doesn't l
 ### 3. How it Finds Reels in the First Place (The APIs)
 Depending on how you search, it uses two different methods:
 * **Hashtag Search:** It secretly talks to Instagram's hidden internal API (`/api/v1/tags/web_info/`). This is the exact same API the mobile app uses when you click a hashtag. It returns a neat JSON dictionary containing the top reels for that tag.
-* **Web Search:** It completely ignores Instagram. It asks DuckDuckGo: `site:instagram.com/reel/ "your keyword"`. DuckDuckGo replies with a list of URLs it has seen in the past. 
+* **Creator Search (Direct):** For specific profiles, the app uses the **User Clips API**. It mimics a real person scrolling through a profile's Reels tab. This method is incredibly fast because it fetches the thumbnails, views, and likes for the entire batch in a single request.
+* **Web Search (Fallback):** If Instagram blocks the direct APIs, the app uses DuckDuckGo to find public Reel links as a safety backup. 
 
 ### 4. How the Video Player Works (The Proxy)
 Instagram CDN (Content Delivery Network) has "Hotlinking Protection." If you try to put an Instagram MP4 link directly into your own website, Instagram blocks it with a `403 Forbidden` error because it knows the video isn't being played on Instagram.com.

@@ -12,7 +12,7 @@ from .services import (
     _instagram_headers,
     build_chart_points,
     clear_instagram_session,
-    discover_reels_from_creator,
+    discover_reels_direct,
     discover_reels_from_web,
     enrich_reel,
     get_instagram_session,
@@ -74,9 +74,10 @@ def dashboard():
             query = query.filter(Reel.last_views >= min_views)
         
         if selected_hashtag and selected_hashtag in active_hashtags:
-            query = query.filter(Reel.source_hashtag == selected_hashtag)
+            query = query.filter(Reel.hashtags.contains(selected_hashtag))
         else:
-            query = query.filter(Reel.source_hashtag.in_(active_hashtags))
+            # Match any of the active hashtags
+            query = query.filter(or_(*[Reel.hashtags.contains(tag) for tag in active_hashtags]))
             
         reels = query.limit(limit).all()
         has_more_local = query.count() > len(reels)
@@ -172,16 +173,16 @@ def proxy_image():
 @bp.route('/library')
 def library():
     search_states = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc()).all()
-    # Calculate counts per hashtag
+    # Calculate counts per hashtag/creator
     counts = {}
     for state in search_states:
-        counts[state.hashtag] = Reel.query.filter_by(source_hashtag=state.hashtag).count()
+        counts[state.hashtag] = Reel.query.filter(Reel.hashtags.contains(state.hashtag)).count()
     return render_template('library.html', search_states=search_states, counts=counts)
 
 
 @bp.route('/library/refresh/<string:hashtag>', methods=['POST'])
 def refresh_hashtag_group(hashtag: str):
-    reels = Reel.query.filter_by(source_hashtag=hashtag).all()
+    reels = Reel.query.filter(Reel.hashtags.contains(hashtag)).all()
     for reel in reels:
         try:
             from .services import refresh_reel
@@ -201,7 +202,7 @@ def delete_hashtag_group(hashtag: str):
         db.session.delete(state)
     
     # Delete associated reels
-    reels_deleted = Reel.query.filter_by(source_hashtag=hashtag).delete()
+    reels_deleted = Reel.query.filter(Reel.hashtags.contains(hashtag)).delete(synchronize_session=False)
     
     db.session.commit()
     flash(f"Removed #{hashtag} and deleted {reels_deleted} associated reels from your library.", "success")
@@ -367,25 +368,29 @@ def stream_reel_video(reel_id: int):
 def creator_search():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
-        limit = request.form.get('limit', type=int) or 50
+        max_id = request.form.get('max_id') # For continuing a scroll
+        
         if not username:
             flash('Enter an Instagram profile URL or username.', 'warning')
             return redirect(url_for('main.creator_search'))
         
-        imported, errors, new_reels = discover_reels_from_creator(username, limit=limit)
+        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id)
         
         # Clean username for tag
         clean_username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
         tag = f"creator:{clean_username}"
         
-        if new_reels:
-            reel_ids = [r.id for r in new_reels]
-            threading.Thread(target=async_enrich_reels, args=(current_app._get_current_object(), reel_ids, f"@{clean_username}")).start()
-            flash(f'Imported {imported} reels for @{clean_username}. The app is now automatically fetching their data in the background.', 'success')
-        elif imported:
-            flash(f'Imported {imported} reels for @{clean_username}.', 'success')
-        else:
-            flash(f'No new reels were found for @{clean_username}.', 'warning')
+        # Update search state with the new cursor
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first() or HashtagSearchState(hashtag=tag)
+        state.next_max_id = next_max_id
+        state.more_available = bool(next_max_id)
+        db.session.add(state)
+        db.session.commit()
+        
+        if imported:
+            flash(f'Found {imported} reels for @{clean_username} in this scroll session.', 'success')
+        elif not errors:
+            flash(f'No new reels found for @{clean_username}. You might have everything or Instagram is rate-limiting.', 'info')
             
         for error in errors:
             flash(error, 'danger')
@@ -403,12 +408,12 @@ def creator_search():
     creator_stats_list = []
     if not active_creator:
         for state in recent_searches:
-            creator_reels = Reel.query.filter(Reel.source_hashtag == state.hashtag).all()
+            creator_reels = Reel.query.filter(Reel.hashtags.contains(state.hashtag)).all()
             total = len(creator_reels)
             if total == 0:
                 continue
             
-            processed = sum(1 for r in creator_reels if r.enrichment_status == 'ok')
+            processed = sum(1 for r in creator_reels if r.enrichment_status != 'pending')
             progress = int((processed / total) * 100)
             
             creator_stats_list.append({
@@ -417,20 +422,22 @@ def creator_search():
                 'processed_reels': processed,
                 'progress': progress,
                 'total_views': sum((r.last_views or 0) for r in creator_reels),
-                'last_updated': state.updated_at
+                'last_updated': state.updated_at,
+                'next_max_id': state.next_max_id,
+                'more_available': state.more_available
             })
 
     reels = []
     has_more_local = False
-    stats = {'reel_count': 0, 'processed_reels': 0, 'progress': 0, 'avg_views': 0, 'max_views': 0, 'playable_reels': 0}
+    stats = {'reel_count': 0, 'processed_reels': 0, 'progress': 0, 'avg_views': 0, 'max_views': 0, 'playable_reels': 0, 'next_max_id': None, 'more_available': False}
     
     if active_creator:
         tag = f"creator:{active_creator}"
-        # Base query for stats (all reels)
-        all_group_reels = Reel.query.filter(Reel.source_hashtag == tag).all()
+        # Base query for stats (all reels matching this creator tag)
+        all_group_reels = Reel.query.filter(Reel.hashtags.contains(tag)).all()
         
-        # Only show fully processed reels in the UI
-        query = Reel.query.filter(Reel.source_hashtag == tag, Reel.enrichment_status == 'ok')
+        # Only show fully processed reels in the UI (ok or error)
+        query = Reel.query.filter(Reel.hashtags.contains(tag), Reel.enrichment_status == 'ok')
         
         if sort_by == 'views_desc':
             query = query.order_by(Reel.last_views.desc().nullslast())
@@ -445,7 +452,7 @@ def creator_search():
         has_more_local = query.count() > len(reels)
         
         stats['reel_count'] = len(all_group_reels)
-        stats['processed_reels'] = len(query.all())
+        stats['processed_reels'] = sum(1 for r in all_group_reels if r.enrichment_status != 'pending')
         stats['progress'] = int((stats['processed_reels'] / max(stats['reel_count'], 1)) * 100)
         
         stats['avg_views'] = int(sum((r.last_views or 0) for r in all_group_reels) / max(len(all_group_reels), 1))
@@ -453,7 +460,10 @@ def creator_search():
         stats['playable_reels'] = sum(1 for r in all_group_reels if r.playable_url)
 
         state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if not state:
+        if state:
+            stats['next_max_id'] = state.next_max_id
+            stats['more_available'] = state.more_available
+        else:
             db.session.add(HashtagSearchState(hashtag=tag))
             db.session.commit()
 
@@ -653,4 +663,3 @@ def web_search():
         sort_by=sort_by,
         has_more_local=has_more_local
     )
-

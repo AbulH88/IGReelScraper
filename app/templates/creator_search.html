@@ -12,13 +12,7 @@
         <p class="text-muted">Enter a username or profile URL. The app will find their reels and process them in the background.</p>
         <form method="post" action="{{ url_for('main.creator_search') }}" class="d-flex align-items-center flex-wrap gap-3 mt-3">
           <input type="text" name="username" class="form-control mr-3" style="max-width: 300px;" placeholder="@username or URL" required>
-          <select name="limit" class="form-control mr-3" style="width: 150px;">
-             <option value="20">20 Reels</option>
-             <option value="50" selected>50 Reels</option>
-             <option value="100">100 Reels</option>
-             <option value="200">200 Reels</option>
-          </select>
-          <button type="submit" class="btn-beautiful">Search Creator</button>
+          <button type="submit" class="btn-beautiful">Add & Start Scrolling</button>
         </form>
       </div>
     </div>
@@ -27,43 +21,54 @@
 
 <div class="row mt-4">
   <div class="col-12">
-    <h4 class="mb-3">Tracked Creators</h4>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="m-0">Tracked Creators</h4>
+    </div>
     {% if not creator_stats_list %}
       <div class="text-muted text-center py-5">No creators tracked yet. Add one above!</div>
     {% endif %}
     <div class="row">
       {% for creator in creator_stats_list %}
       <div class="col-lg-4 col-md-6 mb-4">
-        <a href="{{ url_for('main.creator_search', active_creator=creator.username) }}" style="text-decoration: none;">
-          <div class="card h-100 reel-box-card" style="transition: transform 0.2s;">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="card h-100 reel-box-card" style="transition: transform 0.2s;">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <a href="{{ url_for('main.creator_search', active_creator=creator.username) }}" style="text-decoration: none;">
                 <h5 class="m-0 font-weight-bold" style="color: var(--accent-primary);">@{{ creator.username }}</h5>
-                <span class="badge" style="background: rgba(var(--text-main-rgb), 0.05); color: var(--text-main);">
-                  <i class="fa fa-video-camera mr-1"></i> {{ creator.total_reels }}
-                </span>
+              </a>
+              <span class="badge" style="background: rgba(var(--text-main-rgb), 0.05); color: var(--text-main);">
+                <i class="fa fa-video-camera mr-1"></i> {{ creator.total_reels }}
+              </span>
+            </div>
+            
+            <div class="d-flex justify-content-between text-muted small mb-1">
+              <span>Data Processing</span>
+              <span>{{ creator.progress }}%</span>
+            </div>
+            <div class="progress mb-3" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
+              <div class="progress-bar" style="width: {{ creator.progress }}%; background: {% if creator.progress == 100 %}#22c55e{% else %}var(--accent-secondary){% endif %};"></div>
+            </div>
+            
+            <div class="d-flex justify-content-between align-items-end mt-4">
+              <div>
+                <div class="text-muted small text-uppercase font-weight-bold">Total Views</div>
+                <div class="font-weight-bold" style="font-size: 1.2rem; color: var(--text-main);">{{ creator.total_views|compact_number }}</div>
               </div>
-              
-              <div class="d-flex justify-content-between text-muted small mb-1">
-                <span>Data Processing</span>
-                <span>{{ creator.progress }}%</span>
-              </div>
-              <div class="progress mb-3" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
-                <div class="progress-bar" style="width: {{ creator.progress }}%; background: {% if creator.progress == 100 %}#22c55e{% else %}var(--accent-secondary){% endif %};"></div>
-              </div>
-              
-              <div class="d-flex justify-content-between align-items-end mt-4">
-                <div>
-                  <div class="text-muted small text-uppercase font-weight-bold">Total Views</div>
-                  <div class="font-weight-bold" style="font-size: 1.2rem; color: var(--text-main);">{{ creator.total_views|compact_number }}</div>
-                </div>
-                <div class="text-muted small">
-                  Updated {{ creator.last_updated.strftime('%b %d') }}
-                </div>
+              <div class="d-flex flex-column align-items-end">
+                {% if creator.more_available %}
+                <form method="post" action="{{ url_for('main.creator_search') }}">
+                  <input type="hidden" name="username" value="{{ creator.username }}">
+                  <input type="hidden" name="max_id" value="{{ creator.next_max_id }}">
+                  <button type="submit" class="btn btn-xs btn-outline-primary mb-2" title="Scroll for more reels">
+                    <i class="fa fa-arrow-down"></i> Scroll More
+                  </button>
+                </form>
+                {% endif %}
+                <div class="text-muted small">Updated {{ creator.last_updated.strftime('%b %d') }}</div>
               </div>
             </div>
           </div>
-        </a>
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -115,6 +120,13 @@
               <p class="mb-0 text-muted">Showing {{ stats.processed_reels }} of {{ stats.reel_count }} total tracked videos.</p>
             </div>
             <div class="inline-actions mt-3 mt-md-0">
+              {% if stats.more_available %}
+              <form method="post" action="{{ url_for('main.creator_search') }}" class="mr-2">
+                <input type="hidden" name="username" value="{{ active_creator }}">
+                <input type="hidden" name="max_id" value="{{ stats.next_max_id }}">
+                <button type="submit" class="btn-beautiful" style="padding: 0.5rem 1rem !important;"><i class="fa fa-arrow-down"></i> Scroll More</button>
+              </form>
+              {% endif %}
               <div class="view-switcher mr-3">
                 <button type="button" class="btn-beautiful-ghost active" id="view-list" title="List View"><i class="fa fa-list"></i></button>
                 <button type="button" class="btn-beautiful-ghost" id="view-grid" title="Grid View"><i class="fa fa-th"></i></button>
