@@ -73,6 +73,10 @@
       background: var(--bg-sidebar) !important;
       border-right: 1px solid var(--border-color);
       width: 18rem !important;
+      height: 5rem !important;
+      position: fixed;
+      top: 0;
+      z-index: 1000;
       transition: all 0.3s ease;
     }
 
@@ -112,6 +116,11 @@
       -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--border-color);
       left: 18rem !important;
+      height: 5rem !important;
+      position: fixed;
+      top: 0;
+      width: calc(100% - 18rem) !important;
+      z-index: 1000;
     }
 
     .header-content {
@@ -151,6 +160,41 @@
       background: var(--bg-sidebar) !important;
       border-right: 1px solid var(--border-color);
       width: 18rem !important;
+      top: 5rem !important;
+      position: fixed;
+      height: calc(100vh - 5rem);
+      z-index: 999;
+    }
+    
+    .nav-header {
+      background: var(--bg-sidebar) !important;
+      border-right: 1px solid var(--border-color);
+      width: 18rem !important;
+      height: 5rem !important;
+      position: fixed;
+      top: 0;
+      z-index: 1000;
+      transition: all 0.3s ease;
+    }
+
+    .header {
+      background: var(--glass-bg) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-color);
+      left: 18rem !important;
+      height: 5rem !important;
+      position: fixed;
+      top: 0;
+      width: calc(100% - 18rem) !important;
+      z-index: 1000;
+    }
+
+    .content-body {
+      margin-left: 18rem !important;
+      padding-top: 6rem !important; /* to account for fixed header */
+      transition: all 0.3s ease;
+      min-height: 100vh;
     }
 
     .nk-sidebar .metismenu a {
@@ -252,18 +296,20 @@
     }
 
     /* --- Forms --- */
-    input[type="text"], input[type="number"], input[type="url"], textarea {
+    input[type="text"], input[type="number"], input[type="url"], textarea, select.form-control {
       background: var(--bg-main) !important;
       border: 1px solid var(--border-color) !important;
       color: var(--text-main) !important;
       padding: 0.8rem 1.2rem !important;
       border-radius: 12px !important;
       font-weight: 500;
+      height: auto !important;
     }
 
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
       border-color: var(--accent-primary) !important;
       box-shadow: 0 0 0 4px rgba(255, 48, 64, 0.1) !important;
+      outline: none !important;
     }
 
     /* --- Buttons --- */
@@ -396,16 +442,6 @@
     }
     .reelscope-banner strong, .reelscope-banner .small { color: #fff !important; }
 
-    ::-webkit-scrollbar { width: 10px; }
-    ::-webkit-scrollbar-track { background: var(--bg-main); }
-    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; border: 3px solid var(--bg-main); }
-    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-    @media (max-width: 991px) {
-      .nk-sidebar, .nav-header { width: 5rem !important; }
-      .content-body, .header { margin-left: 5rem !important; left: 5rem !important; }
-      .brand-title-text { display: none; }
-    }
   </style>
 </head>
 <body>

@@ -1,41 +1,56 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="panel">
-  <h1>Add tracked reel</h1>
-  <p class="muted">Paste a public reel URL. The app will try to enrich visible metadata and save a first snapshot.</p>
-  <form method="post">
-    <div class="three-col">
-      <div>
-        <label>Reel URL</label>
-        <input name="url" required placeholder="https://www.instagram.com/reel/.../">
+<div class="row justify-content-center">
+  <div class="col-lg-10">
+    <div class="card">
+      <div class="card-body p-5">
+        <h3 class="card-title mb-2">Add a Tracked Reel</h3>
+        <p class="text-muted mb-4">Paste a public reel URL. The app will automatically try to enrich visible metadata and save a first snapshot.</p>
+        
+        <form method="post">
+          <div class="row mb-4">
+            <div class="col-md-12 form-group">
+              <label class="font-weight-bold">Reel URL <span class="text-danger">*</span></label>
+              <input type="url" class="form-control" name="url" required placeholder="https://www.instagram.com/reel/.../">
+            </div>
+          </div>
+          
+          <h5 class="mb-3 border-bottom pb-2" style="border-color: var(--border-color) !important;">Categorization</h5>
+          <div class="row mb-4">
+            <div class="col-md-6 form-group">
+              <label>Source Hashtag</label>
+              <input type="text" class="form-control" name="source_hashtag" placeholder="e.g. fitness">
+            </div>
+            <div class="col-md-6 form-group">
+              <label>Additional Hashtags</label>
+              <input type="text" class="form-control" name="hashtags" placeholder="e.g. fitness, growth, gym">
+            </div>
+          </div>
+
+          <h5 class="mb-3 border-bottom pb-2" style="border-color: var(--border-color) !important;">Analysis</h5>
+          <div class="row mb-4">
+            <div class="col-md-4 form-group"><label>Creator</label><input type="text" class="form-control" name="creator"></div>
+            <div class="col-md-4 form-group"><label>Niche</label><input type="text" class="form-control" name="niche"></div>
+            <div class="col-md-4 form-group"><label>Hook</label><input type="text" class="form-control" name="hook"></div>
+            
+            <div class="col-md-4 form-group"><label>CTA</label><input type="text" class="form-control" name="cta"></div>
+            <div class="col-md-4 form-group"><label>Format</label><input type="text" class="form-control" name="format"></div>
+            <div class="col-md-4 form-group"><label>Notes</label><input type="text" class="form-control" name="notes"></div>
+          </div>
+
+          <h5 class="mb-3 border-bottom pb-2" style="border-color: var(--border-color) !important;">Manual Stat Overrides</h5>
+          <div class="row mb-4">
+            <div class="col-md-4 form-group"><label>Initial Views</label><input type="number" class="form-control" name="last_views"></div>
+            <div class="col-md-4 form-group"><label>Initial Likes</label><input type="number" class="form-control" name="last_likes"></div>
+            <div class="col-md-4 form-group"><label>Initial Comments</label><input type="number" class="form-control" name="last_comments"></div>
+          </div>
+          
+          <div class="text-right">
+            <button type="submit" class="btn-beautiful px-5">Add Reel to Tracker</button>
+          </div>
+        </form>
       </div>
-      <div>
-        <label>Source hashtag</label>
-        <input name="source_hashtag" placeholder="fitness">
-      </div>
-      <div>
-        <label>Hashtags</label>
-        <input name="hashtags" placeholder="fitness, growth, gym">
-      </div>
     </div>
-    <div class="three-col">
-      <div><label>Creator</label><input name="creator"></div>
-      <div><label>Niche</label><input name="niche"></div>
-      <div><label>Hook</label><input name="hook"></div>
-    </div>
-    <div class="three-col">
-      <div><label>CTA</label><input name="cta"></div>
-      <div><label>Format</label><input name="format"></div>
-      <div><label>Notes</label><input name="notes"></div>
-    </div>
-    <div class="three-col">
-      <div><label>Manual views</label><input type="number" name="last_views"></div>
-      <div><label>Manual likes</label><input type="number" name="last_likes"></div>
-      <div><label>Manual comments</label><input type="number" name="last_comments"></div>
-    </div>
-    <div class="mt-4">
-      <button type="submit" class="btn-beautiful">Create tracked reel</button>
-    </div>
-  </form>
+  </div>
 </div>
 {% endblock %}

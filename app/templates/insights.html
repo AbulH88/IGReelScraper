@@ -1,50 +1,67 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="two-col">
-  <div class="panel">
-    <h1>Insights</h1>
-    <p class="muted">These insights come from reels already tracked by the app and their collected snapshots.</p>
-    <h4 class="mt-4 mb-3">Top hashtags in tracked reels</h4>
-    <div class="table-responsive">
-      <table class="table table-xs mb-0">
-        <thead><tr><th>Hashtag</th><th>Count</th></tr></thead>
-        <tbody>
-          {% for tag, count in top_tags %}
-          <tr><td>#{{ tag }}</td><td>{{ count }}</td></tr>
-          {% else %}
-          <tr><td colspan="2" class="muted text-center py-4">No hashtag data yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<div class="row">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Insights</h4>
+        <p class="text-muted">These insights come from reels already tracked by the app and their collected snapshots.</p>
+        <h5 class="mt-4 mb-3">Top hashtags in tracked reels</h5>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead><tr><th>Hashtag</th><th>Count</th></tr></thead>
+            <tbody>
+              {% for tag, count in top_tags %}
+              <tr><td class="font-weight-bold" style="color: var(--accent-primary);">#{{ tag }}</td><td>{{ count }}</td></tr>
+              {% else %}
+              <tr><td colspan="2" class="text-muted text-center py-4">No hashtag data yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="panel">
-    <h2>Similar content prompts</h2>
-    {% for idea in idea_prompts %}
-      <div class="panel" style="background: rgba(255,255,255,0.03) !important; border: 1px solid var(--border-color) !important; margin-bottom: 12px; padding: 1rem;">{{ idea }}</div>
-    {% else %}
-      <div class="text-muted">Save hooks, CTA styles, and formats to generate prompt ideas here.</div>
-    {% endfor %}
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Similar content prompts</h4>
+        <p class="text-muted mb-4">AI generated prompts based on your best reels.</p>
+        {% for idea in idea_prompts %}
+          <div class="p-3 mb-3 rounded" style="background: rgba(var(--text-main-rgb), 0.03); border: 1px solid var(--border-color);">
+            {{ idea }}
+          </div>
+        {% else %}
+          <div class="text-muted py-3">Save hooks, CTA styles, and formats on your reels to generate prompt ideas here.</div>
+        {% endfor %}
+      </div>
+    </div>
   </div>
 </div>
-<div class="panel">
-  <h2 class="mb-3">Best tracked reels</h2>
-  <div class="table-responsive">
-    <table class="table table-xs mb-0">
-      <thead><tr><th>Reel</th><th>Score</th><th>Latest views</th><th>Snapshots</th></tr></thead>
-      <tbody>
-      {% for reel in reels|sort(attribute='viral_score', reverse=true) %}
-        <tr>
-          <td><a class="font-weight-bold" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">{{ reel.title or reel.shortcode or 'Tracked reel' }}</a></td>
-          <td>{{ reel.viral_score|round(2) or 0 }}</td>
-          <td>{{ reel.last_views|compact_number or 0 }}</td>
-          <td>{{ reel.snapshots|length }}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="4" class="muted text-center py-4">No reels tracked yet.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+<div class="row">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title mb-4">Best tracked reels</h4>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead><tr><th>Reel</th><th>Viral Score</th><th>Latest views</th><th>Snapshots</th></tr></thead>
+            <tbody>
+            {% for reel in reels|sort(attribute='viral_score', reverse=true) %}
+              <tr>
+                <td><a class="font-weight-bold" style="color: var(--accent-primary);" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">{{ reel.title or reel.shortcode or 'Tracked reel' }}</a></td>
+                <td><span class="badge badge-success">{{ reel.viral_score|round(2) or 0 }}</span></td>
+                <td class="font-weight-bold">{{ reel.last_views|compact_number or 0 }}</td>
+                <td>{{ reel.snapshots|length }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="text-muted text-center py-4">No reels tracked yet.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
