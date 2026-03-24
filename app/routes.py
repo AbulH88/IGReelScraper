@@ -364,6 +364,49 @@ def stream_reel_video(reel_id: int):
     )
 
 
+def async_scroll_reels(app, username, max_id=None):
+    with app.app_context():
+        from .models import db, Reel, HashtagSearchState, TaskNotification
+        from .services import discover_reels_direct
+        
+        tag = f"creator:{username}"
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+        if not state:
+            state = HashtagSearchState(hashtag=tag)
+            db.session.add(state)
+        
+        state.status = 'scrolling'
+        state.last_error = None
+        db.session.commit()
+        
+        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id)
+        
+        state.next_max_id = next_max_id
+        state.more_available = bool(next_max_id)
+        
+        if errors:
+            state.status = 'error'
+            state.last_error = "; ".join(errors)
+        else:
+            state.status = 'ready'
+            state.last_error = None
+            
+        db.session.add(state)
+        db.session.commit()
+        
+        # Notify completion
+        msg = f"Finished scrolling @{username}. Found {imported} new reels."
+        if errors:
+            msg = f"Scroll for @{username} interrupted. Found {imported} reels."
+            
+        notif = TaskNotification(
+            message=msg,
+            action_url=url_for('main.creator_search', active_creator=username)
+        )
+        db.session.add(notif)
+        db.session.commit()
+
+
 @bp.route('/creator-search', methods=['GET', 'POST'])
 def creator_search():
     if request.method == 'POST':
@@ -374,27 +417,23 @@ def creator_search():
             flash('Enter an Instagram profile URL or username.', 'warning')
             return redirect(url_for('main.creator_search'))
         
-        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id)
-        
-        # Clean username for tag
+        # Clean username
         clean_username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
         tag = f"creator:{clean_username}"
         
-        # Update search state with the new cursor
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first() or HashtagSearchState(hashtag=tag)
-        state.next_max_id = next_max_id
-        state.more_available = bool(next_max_id)
-        db.session.add(state)
-        db.session.commit()
+        # Check if already scrolling
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+        if state and state.status == 'scrolling':
+            flash(f'Already scrolling @{clean_username}. Please wait.', 'warning')
+            return redirect(url_for('main.creator_search', active_creator=clean_username))
+            
+        # Start background scroll
+        threading.Thread(
+            target=async_scroll_reels, 
+            args=(current_app._get_current_object(), clean_username, max_id)
+        ).start()
         
-        if imported:
-            flash(f'Found {imported} reels for @{clean_username} in this scroll session.', 'success')
-        elif not errors:
-            flash(f'No new reels found for @{clean_username}. You might have everything or Instagram is rate-limiting.', 'info')
-            
-        for error in errors:
-            flash(error, 'danger')
-            
+        flash(f'Started human-like scroll for @{clean_username} in the background.', 'success')
         return redirect(url_for('main.creator_search', active_creator=clean_username))
 
     active_creator = request.args.get('active_creator', '')
@@ -410,17 +449,16 @@ def creator_search():
         for state in recent_searches:
             creator_reels = Reel.query.filter(Reel.hashtags.contains(state.hashtag)).all()
             total = len(creator_reels)
-            if total == 0:
-                continue
             
             processed = sum(1 for r in creator_reels if r.enrichment_status != 'pending')
-            progress = int((processed / total) * 100)
+            progress = int((processed / max(total, 1)) * 100)
             
             creator_stats_list.append({
                 'username': state.hashtag.replace('creator:', ''),
                 'total_reels': total,
                 'processed_reels': processed,
                 'progress': progress,
+                'status': state.status,
                 'total_views': sum((r.last_views or 0) for r in creator_reels),
                 'last_updated': state.updated_at,
                 'next_max_id': state.next_max_id,
@@ -429,14 +467,28 @@ def creator_search():
 
     reels = []
     has_more_local = False
-    stats = {'reel_count': 0, 'processed_reels': 0, 'progress': 0, 'avg_views': 0, 'max_views': 0, 'playable_reels': 0, 'next_max_id': None, 'more_available': False}
+    stats = {
+        'reel_count': 0, 
+        'processed_reels': 0, 
+        'progress': 0, 
+        'avg_views': 0, 
+        'max_views': 0, 
+        'playable_reels': 0, 
+        'next_max_id': None, 
+        'more_available': False,
+        'status': 'ready',
+        'last_error': None
+    }
     
     if active_creator:
         tag = f"creator:{active_creator}"
-        # Base query for stats (all reels matching this creator tag)
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+        if not state:
+            state = HashtagSearchState(hashtag=tag)
+            db.session.add(state)
+            db.session.commit()
+            
         all_group_reels = Reel.query.filter(Reel.hashtags.contains(tag)).all()
-        
-        # Only show fully processed reels in the UI (ok or error)
         query = Reel.query.filter(Reel.hashtags.contains(tag), Reel.enrichment_status == 'ok')
         
         if sort_by == 'views_desc':
@@ -452,20 +504,18 @@ def creator_search():
         has_more_local = query.count() > len(reels)
         
         stats['reel_count'] = len(all_group_reels)
-        stats['processed_reels'] = sum(1 for r in all_group_reels if r.enrichment_status != 'pending')
-        stats['progress'] = int((stats['processed_reels'] / max(stats['reel_count'], 1)) * 100)
+        stats['processed_reels'] = len(reels) # Showing only processed
+        stats['progress'] = int((sum(1 for r in all_group_reels if r.enrichment_status != 'pending') / max(stats['reel_count'], 1)) * 100)
         
         stats['avg_views'] = int(sum((r.last_views or 0) for r in all_group_reels) / max(len(all_group_reels), 1))
         stats['max_views'] = max([r.last_views or 0 for r in all_group_reels] or [0])
         stats['playable_reels'] = sum(1 for r in all_group_reels if r.playable_url)
+        stats['status'] = state.status
+        stats['last_error'] = state.last_error
+        stats['next_max_id'] = state.next_max_id
+        stats['more_available'] = state.more_available
 
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if state:
-            stats['next_max_id'] = state.next_max_id
-            stats['more_available'] = state.more_available
-        else:
-            db.session.add(HashtagSearchState(hashtag=tag))
-            db.session.commit()
+    any_scrolling = any(c['status'] == 'scrolling' for c in creator_stats_list)
 
     return render_template(
         'creator_search.html',
@@ -473,6 +523,7 @@ def creator_search():
         active_creator=active_creator,
         recent_searches=recent_searches,
         creator_stats_list=creator_stats_list,
+        any_scrolling=any_scrolling,
         stats=stats,
         limit=limit,
         sort_by=sort_by,
@@ -594,7 +645,7 @@ def web_search():
             flash('Enter a keyword to search.', 'warning')
             return redirect(url_for('main.web_search'))
         
-        imported, errors, new_reels = discover_reels_from_web(keyword, limit=limit)
+        imported, errors, new_reels, _ = discover_reels_from_web(keyword, limit=limit)
         
         if new_reels:
             # Kick off automatic enrichment in the background

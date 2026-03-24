@@ -92,3 +92,13 @@ def _ensure_schema_updates():
                 )
                 """
             )
+
+    # Update hashtag_search_state table
+    columns = {column["name"] for column in inspector.get_columns("hashtag_search_state")}
+    if "status" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE hashtag_search_state ADD COLUMN status VARCHAR(20) DEFAULT 'ready'")
+    if "last_error" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE hashtag_search_state ADD COLUMN last_error TEXT")
+

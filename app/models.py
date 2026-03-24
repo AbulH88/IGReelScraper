@@ -90,6 +90,8 @@ class HashtagSearchState(db.Model):
     next_page = db.Column(db.Integer)
     next_max_id = db.Column(db.Text)
     more_available = db.Column(db.Boolean, default=False, nullable=False)
+    status = db.Column(db.String(20), default='ready') # scrolling, done, error
+    last_error = db.Column(db.Text)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 

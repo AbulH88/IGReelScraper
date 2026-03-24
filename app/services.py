@@ -579,7 +579,6 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
     """
     Fetch reels directly from Instagram API using the authenticated session.
     Mimics human scrolling by fetching batches with random delays.
-    Returns (imported_count, errors, new_reels, next_max_id)
     """
     import time
     import random
@@ -595,7 +594,7 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
     # 2. Get User ID
     user_id = get_user_id(username)
     if not user_id:
-        errors.append(f"Could not find internal ID for @{username}. Instagram might be blocking profile lookups.")
+        errors.append(f"Could not find ID for @{username}. Instagram might be blocking profile lookups.")
         return 0, errors, [], None
         
     tag = f"creator:{username}"
@@ -608,13 +607,13 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
     cookies = _instagram_cookies(session_config)
     url = f"{INSTAGRAM_BASE}/api/v1/clips/user_clips/"
 
-    # Mimic scrolling through up to 5 pages per request (about 100-200 reels)
-    # Each page fetch has a human-like delay.
-    for page_num in range(5):
+    # Human-like scrolling loop
+    # We will fetch up to 10 batches (about 240 reels) per "Scroll" action to avoid too long a thread
+    for page_num in range(10):
         try:
             data = {
                 "target_user_id": user_id,
-                "page_size": 24, # Standard Instagram batch size
+                "page_size": 24,
                 "include_feed_video": "true",
             }
             if current_max_id:
@@ -623,7 +622,7 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
             response = requests.post(url, headers=headers, cookies=cookies, data=data, timeout=REQUEST_TIMEOUT)
             
             if response.status_code == 429:
-                errors.append("Instagram rate limit reached (429). Stopping scroll here.")
+                errors.append("Instagram rate limit reached (429).")
                 break
             
             response.raise_for_status()
@@ -676,21 +675,19 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
             
             db.session.commit()
             
-            # Check for next page
             current_max_id = payload.get("paging_info", {}).get("max_id") or payload.get("next_max_id")
             if not current_max_id:
                 break
                 
-            # Human-like delay between "scrolls"
-            time.sleep(random.uniform(2.0, 4.5))
+            time.sleep(random.uniform(2.5, 5.0))
             
         except Exception as exc:
-            errors.append(f"Scroll stopped at page {page_num+1}: {exc}")
+            errors.append(f"Scroll interrupted: {exc}")
             break
             
     return imported, errors, new_reels, current_max_id
 
-def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "web") -> tuple[int, list[str], list[Reel]]:
+def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "web") -> tuple[int, list[str], list[Reel], str | None]:
     errors = []
     imported = 0
     new_reels = []
@@ -702,7 +699,7 @@ def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "we
             results = list(ddgs.text(query, max_results=limit))
     except Exception as exc:
         errors.append(f"Web search failed: {exc}")
-        return 0, errors, []
+        return 0, errors, [], None
 
     for item in results:
         url = item.get('href')
@@ -753,5 +750,5 @@ def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "we
         imported += 1
         
     db.session.commit()
-    return imported, errors, new_reels
+    return imported, errors, new_reels, None
 

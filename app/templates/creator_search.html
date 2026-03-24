@@ -4,15 +4,23 @@
 
 {% if not active_creator %}
 <!-- CREATOR DASHBOARD VIEW -->
+<script>
+  // Refresh the dashboard automatically if any creator is being scrolled
+  const creatorStats = {{ creator_stats_list|tojson }};
+  if (creatorStats.some(c => c.status === 'scrolling')) {
+    setTimeout(function() { window.location.reload(); }, 5000);
+  }
+</script>
+
 <div class="row">
   <div class="col-12">
     <div class="card">
       <div class="card-body">
         <h4 class="card-title">Add New Creator</h4>
         <p class="text-muted">Enter a username or profile URL. The app will find their reels and process them in the background.</p>
-        <form method="post" action="{{ url_for('main.creator_search') }}" class="d-flex align-items-center flex-wrap gap-3 mt-3">
-          <input type="text" name="username" class="form-control mr-3" style="max-width: 300px;" placeholder="@username or URL" required>
-          <button type="submit" class="btn-beautiful">Add & Start Scrolling</button>
+        <form method="post" action="{{ url_for('main.creator_search') }}" class="d-flex align-items-center flex-wrap mt-3">
+          <input type="text" name="username" class="form-control mr-3 mb-2" style="max-width: 300px;" placeholder="@username or URL" required>
+          <button type="submit" class="btn-beautiful mb-2">Add & Start Scrolling</button>
         </form>
       </div>
     </div>
@@ -36,13 +44,17 @@
               <a href="{{ url_for('main.creator_search', active_creator=creator.username) }}" style="text-decoration: none;">
                 <h5 class="m-0 font-weight-bold" style="color: var(--accent-primary);">@{{ creator.username }}</h5>
               </a>
+              {% if creator.status == 'scrolling' %}
+              <span class="badge badge-warning"><i class="fa fa-spinner fa-spin mr-1"></i> Scrolling...</span>
+              {% else %}
               <span class="badge" style="background: rgba(var(--text-main-rgb), 0.05); color: var(--text-main);">
                 <i class="fa fa-video-camera mr-1"></i> {{ creator.total_reels }}
               </span>
+              {% endif %}
             </div>
             
             <div class="d-flex justify-content-between text-muted small mb-1">
-              <span>Data Processing</span>
+              <span>{% if creator.status == 'scrolling' %}Finding reels...{% else %}Data Processing{% endif %}</span>
               <span>{{ creator.progress }}%</span>
             </div>
             <div class="progress mb-3" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
@@ -55,12 +67,20 @@
                 <div class="font-weight-bold" style="font-size: 1.2rem; color: var(--text-main);">{{ creator.total_views|compact_number }}</div>
               </div>
               <div class="d-flex flex-column align-items-end">
-                {% if creator.more_available %}
+                {% if creator.status == 'ready' and creator.more_available %}
                 <form method="post" action="{{ url_for('main.creator_search') }}">
                   <input type="hidden" name="username" value="{{ creator.username }}">
                   <input type="hidden" name="max_id" value="{{ creator.next_max_id }}">
                   <button type="submit" class="btn btn-xs btn-outline-primary mb-2" title="Scroll for more reels">
                     <i class="fa fa-arrow-down"></i> Scroll More
+                  </button>
+                </form>
+                {% elif creator.status == 'error' %}
+                <form method="post" action="{{ url_for('main.creator_search') }}">
+                  <input type="hidden" name="username" value="{{ creator.username }}">
+                  <input type="hidden" name="max_id" value="{{ creator.next_max_id }}">
+                  <button type="submit" class="btn btn-xs btn-danger mb-2" title="Retry scroll">
+                    <i class="fa fa-refresh"></i> Retry Scroll
                   </button>
                 </form>
                 {% endif %}
@@ -87,21 +107,33 @@
     <div class="card">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="m-0 text-muted">Data Processing Status</h5>
+          <h5 class="m-0 text-muted">
+            {% if stats.status == 'scrolling' %}
+              Finding Reels...
+            {% else %}
+              Data Processing Status
+            {% endif %}
+          </h5>
           <span class="font-weight-bold" style="color: {% if stats.progress == 100 %}#22c55e{% else %}var(--accent-secondary){% endif %};">{{ stats.progress }}% Complete</span>
         </div>
         <div class="progress mb-3" style="height: 10px; background: rgba(var(--text-main-rgb), 0.05); border-radius: 10px;">
           <div class="progress-bar" style="width: {{ stats.progress }}%; background: {% if stats.progress == 100 %}#22c55e{% else %}var(--accent-gradient){% endif %}; border-radius: 10px; transition: width 1s ease;"></div>
         </div>
         <p class="text-muted small m-0">
-          {% if stats.progress < 100 %}
-          <i class="fa fa-cog fa-spin mr-1"></i> Background worker is currently fetching thumbnails and views. Only fully processed reels are shown below. This page will automatically update as data arrives.
+          {% if stats.status == 'scrolling' %}
+          <i class="fa fa-spinner fa-spin mr-1"></i> Human-like scrolling is active. Finding all reels from the profile slowly to avoid blocks.
           <script>
-             // Auto-refresh the page every 5 seconds until processing is complete
+             setTimeout(function() { window.location.reload(); }, 5000);
+          </script>
+          {% elif stats.status == 'error' %}
+          <i class="fa fa-exclamation-triangle mr-1 text-danger"></i> Scroll Interrupted: {{ stats.last_error }}. You can click "Retry Scroll" to continue from here.
+          {% elif stats.progress < 100 %}
+          <i class="fa fa-cog fa-spin mr-1"></i> Finalizing metadata and thumbnails.
+          <script>
              setTimeout(function() { window.location.reload(); }, 5000);
           </script>
           {% else %}
-          <i class="fa fa-check-circle mr-1" style="color: #22c55e;"></i> All {{ stats.reel_count }} reels have been successfully processed and enriched.
+          <i class="fa fa-check-circle mr-1" style="color: #22c55e;"></i> All {{ stats.reel_count }} reels have been successfully found and processed.
           {% endif %}
         </p>
       </div>
