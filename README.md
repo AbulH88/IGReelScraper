@@ -72,3 +72,27 @@ pytest -q
 - `tests/` test suite
 - `start.sh` local startup script
 - `instance/` local SQLite database files
+
+## How the Data Fetching Works
+
+Instagram fights very hard to stop bots from downloading their data, so the app uses a combination of clever tricks to get the info. 
+
+### 1. Bypassing the Login Wall (The "Session" Trick)
+If a bot just asks Instagram for a page, Instagram immediately blocks it and shows a "Log In to Continue" screen. 
+* To fix this, you provide your `sessionid` in the **Instagram Session** page.
+* When the app requests data from Instagram, it attaches your `sessionid` to the request as a "Cookie". 
+* Instagram's servers look at the request, see your Cookie, and think it's a real user browsing the web, bypassing the login wall.
+
+### 2. How it "Reads" the Data (Scraping & Open Graph)
+Once the app gets past the login wall and loads the Reel's webpage, it doesn't look at the page like a human does. It looks at the hidden **HTML Source Code**.
+* **Thumbnails & Video Links:** When you share a link on iMessage or WhatsApp, a preview card pops up. Instagram builds these using hidden `<meta>` tags called "Open Graph" (e.g., `og:image` and `og:video`). The app specifically hunts for these hidden tags to grab the raw MP4 video file and the high-quality JPG thumbnail.
+* **Views, Likes, and Comments:** Instagram hides the exact numbers inside massive blocks of JavaScript on the page. The app uses **Regex** (Regular Expressions) to scan thousands of lines of code in a fraction of a second, hunting for specific patterns like `"viewCount":1500000` or text that says `"1.5M views"`.
+
+### 3. How it Finds Reels in the First Place (The APIs)
+Depending on how you search, it uses two different methods:
+* **Hashtag Search:** It secretly talks to Instagram's hidden internal API (`/api/v1/tags/web_info/`). This is the exact same API the mobile app uses when you click a hashtag. It returns a neat JSON dictionary containing the top reels for that tag.
+* **Web Search:** It completely ignores Instagram. It asks DuckDuckGo: `site:instagram.com/reel/ "your keyword"`. DuckDuckGo replies with a list of URLs it has seen in the past. 
+
+### 4. How the Video Player Works (The Proxy)
+Instagram CDN (Content Delivery Network) has "Hotlinking Protection." If you try to put an Instagram MP4 link directly into your own website, Instagram blocks it with a `403 Forbidden` error because it knows the video isn't being played on Instagram.com.
+* **The Fix:** The app uses a **Proxy**. When you click "Watch," your browser asks the Python app for the video. The Python app adds a header saying `Referer: https://www.instagram.com/`, asks Instagram for the video, and then smoothly hands the video chunks back to you. Instagram thinks the video is being watched on their own site!
