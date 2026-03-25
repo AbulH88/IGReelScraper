@@ -80,6 +80,7 @@ Instagram fights very hard to stop bots from downloading their data, so the app 
 ### 1. Bypassing the Login Wall (The "Session" Trick)
 If a bot just asks Instagram for a page, Instagram immediately blocks it and shows a "Log In to Continue" screen. 
 * To fix this, you provide your `sessionid` in the **Instagram Session** page.
+* **Crucial:** You must also provide the `csrftoken` and `ds_user_id`. These are required for "POST" requests (like searching for creators and scrolling).
 * When the app requests data from Instagram, it attaches your `sessionid` to the request as a "Cookie". 
 * Instagram's servers look at the request, see your Cookie, and think it's a real user browsing the web, bypassing the login wall.
 

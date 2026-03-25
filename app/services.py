@@ -119,6 +119,8 @@ def _instagram_headers(session_config: InstagramSession | None, *, referer: str 
         headers["Accept"] = "*/*"
         headers["X-Requested-With"] = "XMLHttpRequest"
         headers["X-IG-App-ID"] = INSTAGRAM_APP_ID
+        headers["X-ASBD-ID"] = "129477"
+        headers["X-IG-WWW-Claim"] = "0"
         if session_config.csrftoken:
             headers["X-CSRFToken"] = session_config.csrftoken
     return headers
@@ -250,7 +252,7 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple
                 seen.add(item_url)
                 reel_urls.append({"url": item_url, "source_hashtag": hashtag})
 
-    return reel_urls, {"page": page, "next_page": None, "more_available": False}
+    return reel_urls, {"page": 1, "next_page": None, "more_available": False}
 
 
 def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
@@ -572,6 +574,21 @@ def get_user_id(username: str) -> str | None:
     except Exception:
         pass
         
+    # Method 3: Scrape profile HTML for user ID
+    try:
+        response = _public_get(f"{INSTAGRAM_BASE}/{username}/")
+        html = response.text
+        # Look for "profile_id":"12345" or "user_id":"12345"
+        match = re.search(r'"(?:profile|user)_id":"(\d+)"', html)
+        if match:
+            return match.group(1)
+        # Look for "id":"12345" near the username
+        match = re.search(r'"id":"(\d+)","username":"' + username + r'"', html)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+        
     return None
 
 
@@ -594,7 +611,7 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
     # 2. Get User ID
     user_id = get_user_id(username)
     if not user_id:
-        errors.append(f"Could not find ID for @{username}. Instagram might be blocking profile lookups.")
+        errors.append(f"Could not find ID for @{username}. Profile may be private or name changed.")
         return 0, errors, [], None
         
     tag = f"creator:{username}"
@@ -605,37 +622,78 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
 
     headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/{username}/reels/")
     cookies = _instagram_cookies(session_config)
-    url = f"{INSTAGRAM_BASE}/api/v1/clips/user_clips/"
+    url = f"{INSTAGRAM_BASE}/api/v1/clips/user/"
 
-    # Human-like scrolling loop
-    # We will fetch up to 10 batches (about 240 reels) per "Scroll" action to avoid too long a thread
-    for page_num in range(10):
+    # If fresh search, try getting first few from profile info (faster, guaranteed)
+    if not current_max_id:
         try:
-            data = {
-                "target_user_id": user_id,
-                "page_size": 24,
-                "include_feed_video": "true",
-            }
+            profile_url = f"{INSTAGRAM_BASE}/api/v1/users/web_profile_info/?username={username}"
+            profile_payload = _instagram_api_get(profile_url, referer=f"{INSTAGRAM_BASE}/{username}/")
+            user_data = profile_payload.get("data", {}).get("user", {})
+            timeline = user_data.get("edge_owner_to_timeline_media", {})
+            for edge in timeline.get("edges", []):
+                node = edge.get("node", {})
+                if node.get("__typename") != "GraphVideo": continue
+                code = node.get("shortcode")
+                if not code: continue
+                full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
+                existing = Reel.query.filter_by(url=full_url).first()
+                if not existing:
+                    reel = Reel(
+                        source_hashtag=tag,
+                        url=full_url,
+                        shortcode=code,
+                        hashtags=tag,
+                        title=(node.get("edge_media_to_caption", {}).get("edges") or [{}])[0].get("node", {}).get("text"),
+                        creator=username,
+                        thumbnail_url=node.get("display_url"),
+                        enrichment_status="pending",
+                    )
+                    apply_metrics(reel, node.get("video_view_count"), node.get("edge_liked_by", {}).get("count"), None)
+                    db.session.add(reel)
+                    new_reels.append(reel)
+                    imported += 1
+            db.session.commit()
+        except: pass
+
+    # Human-like scrolling loop (up to 15 batches)
+    for page_num in range(15):
+        try:
+            data = {"target_user_id": str(user_id), "page_size": 24}
             if current_max_id:
-                data["max_id"] = current_max_id
+                data["max_id"] = str(current_max_id)
+            
+            if session_config.csrftoken:
+                data["_csrftoken"] = session_config.csrftoken
             
             response = requests.post(url, headers=headers, cookies=cookies, data=data, timeout=REQUEST_TIMEOUT)
             
             if response.status_code == 429:
                 errors.append("Instagram rate limit reached (429).")
                 break
-            
+            if response.status_code == 400:
+                msg = "Bad Request (400)."
+                try:
+                    err_json = response.json()
+                    print(f"DEBUG: 400 Error JSON: {err_json}")
+                    if err_json.get("message"):
+                        msg += f" Reason: {err_json['message']}"
+                except:
+                    print(f"DEBUG: 400 Error Body: {response.text[:200]}")
+                errors.append(f"{msg} Your session might need a refresh or Instagram blocked this batch.")
+                break
+
             response.raise_for_status()
             payload = response.json()
-            
             items = payload.get("items", [])
-            if not items:
-                break
+            if not items: break
                 
-            for media in items:
+            for item in items:
+                # The items are wrapped in a 'media' object
+                media = item.get("media", item) 
                 code = media.get("code")
                 if not code: continue
-                    
+                
                 full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
                 views = media.get("play_count") or media.get("view_count")
                 likes = media.get("like_count")
@@ -646,12 +704,9 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
                     if tag not in existing.hashtag_list:
                         merged = existing.hashtag_list + [tag]
                         existing.hashtags = ", ".join(dict.fromkeys(merged))
-                    
                     apply_metrics(existing, views, likes, comments)
                     thumb = _thumbnail_from_media(media)
-                    video = _video_url_from_media(media)
                     if thumb: existing.thumbnail_url = thumb
-                    if video: existing.video_url = video
                     existing.enrichment_status = "ok"
                     db.session.add(existing)
                     new_reels.append(existing)
@@ -674,18 +729,19 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
                 imported += 1
             
             db.session.commit()
-            
-            current_max_id = payload.get("paging_info", {}).get("max_id") or payload.get("next_max_id")
-            if not current_max_id:
-                break
-                
+            p_info = payload.get("paging_info", {})
+            current_max_id = p_info.get("max_id") or payload.get("next_max_id")
+            print(f"DEBUG: Batch {page_num+1} finished. Next max_id: {current_max_id}")
+            if not current_max_id or not p_info.get("more_available", True): break
             time.sleep(random.uniform(2.5, 5.0))
             
         except Exception as exc:
+            print(f"DEBUG: Scroll batch {page_num+1} exception: {exc}")
             errors.append(f"Scroll interrupted: {exc}")
             break
             
     return imported, errors, new_reels, current_max_id
+
 
 def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "web") -> tuple[int, list[str], list[Reel], str | None]:
     errors = []
@@ -751,4 +807,3 @@ def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "we
         
     db.session.commit()
     return imported, errors, new_reels, None
-

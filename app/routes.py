@@ -74,10 +74,10 @@ def dashboard():
             query = query.filter(Reel.last_views >= min_views)
         
         if selected_hashtag and selected_hashtag in active_hashtags:
-            query = query.filter(Reel.hashtags.contains(selected_hashtag))
+            query = query.filter(Reel.hashtags.like(f"%{selected_hashtag}%"))
         else:
             # Match any of the active hashtags
-            query = query.filter(or_(*[Reel.hashtags.contains(tag) for tag in active_hashtags]))
+            query = query.filter(or_(*[Reel.hashtags.like(f"%{tag}%") for tag in active_hashtags]))
             
         reels = query.limit(limit).all()
         has_more_local = query.count() > len(reels)
@@ -176,13 +176,13 @@ def library():
     # Calculate counts per hashtag/creator
     counts = {}
     for state in search_states:
-        counts[state.hashtag] = Reel.query.filter(Reel.hashtags.contains(state.hashtag)).count()
+        counts[state.hashtag] = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).count()
     return render_template('library.html', search_states=search_states, counts=counts)
 
 
 @bp.route('/library/refresh/<string:hashtag>', methods=['POST'])
 def refresh_hashtag_group(hashtag: str):
-    reels = Reel.query.filter(Reel.hashtags.contains(hashtag)).all()
+    reels = Reel.query.filter(Reel.hashtags.like(f"%{hashtag}%")).all()
     for reel in reels:
         try:
             from .services import refresh_reel
@@ -202,7 +202,7 @@ def delete_hashtag_group(hashtag: str):
         db.session.delete(state)
     
     # Delete associated reels
-    reels_deleted = Reel.query.filter(Reel.hashtags.contains(hashtag)).delete(synchronize_session=False)
+    reels_deleted = Reel.query.filter(Reel.hashtags.like(f"%{hashtag}%")).delete(synchronize_session=False)
     
     db.session.commit()
     flash(f"Removed #{hashtag} and deleted {reels_deleted} associated reels from your library.", "success")
@@ -401,7 +401,7 @@ def async_scroll_reels(app, username, max_id=None):
             
         notif = TaskNotification(
             message=msg,
-            action_url=url_for('main.creator_search', active_creator=username)
+            action_url=f"/creator-search?active_creator={username}"
         )
         db.session.add(notif)
         db.session.commit()
@@ -447,7 +447,7 @@ def creator_search():
     creator_stats_list = []
     if not active_creator:
         for state in recent_searches:
-            creator_reels = Reel.query.filter(Reel.hashtags.contains(state.hashtag)).all()
+            creator_reels = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).all()
             total = len(creator_reels)
             
             processed = sum(1 for r in creator_reels if r.enrichment_status != 'pending')
@@ -488,8 +488,8 @@ def creator_search():
             db.session.add(state)
             db.session.commit()
             
-        all_group_reels = Reel.query.filter(Reel.hashtags.contains(tag)).all()
-        query = Reel.query.filter(Reel.hashtags.contains(tag), Reel.enrichment_status == 'ok')
+        all_group_reels = Reel.query.filter(Reel.hashtags.like(f"%{tag}%")).all()
+        query = Reel.query.filter(Reel.hashtags.like(f"%{tag}%"), Reel.enrichment_status == 'ok')
         
         if sort_by == 'views_desc':
             query = query.order_by(Reel.last_views.desc().nullslast())
@@ -612,9 +612,15 @@ def async_enrich_reels(app, reel_ids, keyword):
                     pass
         
         # Create a notification when finished
+        if keyword.startswith('@'):
+            clean_name = keyword.lstrip('@')
+            action_url = f"/creator-search?active_creator={clean_name}"
+        else:
+            action_url = f"/web-search?active_keyword={keyword}"
+
         notif = TaskNotification(
             message=f"Background fetch complete for '{keyword}'. {success_count} reels analyzed.",
-            action_url=url_for('main.web_search', active_keyword=keyword)
+            action_url=action_url
         )
         db.session.add(notif)
         db.session.commit()
