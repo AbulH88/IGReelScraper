@@ -185,9 +185,9 @@ def test_dashboard_groups_results_by_selected_hashtags():
     with app.app_context():
         routes.db.session.add_all(
             [
-                Reel(url='https://www.instagram.com/reel/fit-one/', shortcode='fit-one', source_hashtag='fitness', title='Fitness Reel'),
-                Reel(url='https://www.instagram.com/reel/biz-one/', shortcode='biz-one', source_hashtag='business', title='Business Reel'),
-                Reel(url='https://www.instagram.com/reel/old-one/', shortcode='old-one', source_hashtag='oldtag', title='Old Reel'),
+                Reel(url='https://www.instagram.com/reel/fit-one/', shortcode='fit-one', source_hashtag='fitness', hashtags='fitness', title='Fitness Reel'),
+                Reel(url='https://www.instagram.com/reel/biz-one/', shortcode='biz-one', source_hashtag='business', hashtags='business', title='Business Reel'),
+                Reel(url='https://www.instagram.com/reel/old-one/', shortcode='old-one', source_hashtag='oldtag', hashtags='oldtag', title='Old Reel'),
             ]
         )
         routes.db.session.add_all(
@@ -214,8 +214,8 @@ def test_dashboard_tab_switches_visible_group():
     with app.app_context():
         routes.db.session.add_all(
             [
-                Reel(url='https://www.instagram.com/reel/fit-two/', shortcode='fit-two', source_hashtag='fitness', title='Fitness Tab Reel'),
-                Reel(url='https://www.instagram.com/reel/biz-two/', shortcode='biz-two', source_hashtag='business', title='Business Tab Reel'),
+                Reel(url='https://www.instagram.com/reel/fit-two/', shortcode='fit-two', source_hashtag='fitness', hashtags='fitness', title='Fitness Tab Reel'),
+                Reel(url='https://www.instagram.com/reel/biz-two/', shortcode='biz-two', source_hashtag='business', hashtags='business', title='Business Tab Reel'),
             ]
         )
         routes.db.session.add_all(

@@ -55,6 +55,18 @@ def _ensure_schema_updates():
     if "video_url" not in columns:
         with db.engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN video_url TEXT")
+    if "media_type" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN media_type VARCHAR(20) DEFAULT 'video'")
+    if "carousel_json" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN carousel_json TEXT")
+    if "local_thumb_path" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN local_thumb_path VARCHAR(500)")
+    if "local_video_path" not in columns:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN local_video_path VARCHAR(500)")
     if "discovery_page" not in columns:
         with db.engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE reel ADD COLUMN discovery_page INTEGER")
@@ -89,6 +101,26 @@ def _ensure_schema_updates():
                     action_url VARCHAR(500),
                     is_read BOOLEAN NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL
+                )
+                """
+            )
+
+    if "creator_stats" not in table_names:
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE creator_stats (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(120) NOT NULL UNIQUE,
+                    full_name VARCHAR(255),
+                    profile_pic_url TEXT,
+                    biography TEXT,
+                    external_url VARCHAR(500),
+                    followers_count INTEGER,
+                    following_count INTEGER,
+                    posts_count INTEGER,
+                    is_verified BOOLEAN DEFAULT 0,
+                    updated_at DATETIME NOT NULL
                 )
                 """
             )

@@ -1,21 +1,21 @@
 import json
 import math
 import re
+import time
+import random
 from datetime import datetime, timezone
 from typing import Iterable
 from urllib.parse import quote_plus, urljoin
 
-import requests
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 from ddgs import DDGS
 from .models import InstagramSession, Reel, ReelSnapshot, db
+from .proxies import proxy_manager
 
-USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-)
-REQUEST_TIMEOUT = 15
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+REQUEST_TIMEOUT = 30
 INSTAGRAM_BASE = "https://www.instagram.com"
 INSTAGRAM_APP_ID = "936619743392459"
 
@@ -95,28 +95,36 @@ def _public_get(url: str) -> requests.Response:
     session_config = get_instagram_session()
     headers = _instagram_headers(session_config)
     cookies = _instagram_cookies(session_config)
+    proxy = proxy_manager.get_random_proxy()
+    
     response = requests.get(
         url,
         headers=headers,
         cookies=cookies,
+        proxy=proxy,
+        impersonate="chrome131",
         timeout=REQUEST_TIMEOUT,
     )
+
     response.raise_for_status()
     return response
 
 
 def _instagram_headers(session_config: InstagramSession | None, *, referer: str | None = None) -> dict:
     headers = {
-        "User-Agent": (
-            session_config.user_agent
-            if session_config and session_config.user_agent
-            else USER_AGENT
-        ),
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
         "Referer": referer or INSTAGRAM_BASE + "/",
     }
     if session_config and session_config.is_active:
-        headers["Accept"] = "*/*"
         headers["X-Requested-With"] = "XMLHttpRequest"
         headers["X-IG-App-ID"] = INSTAGRAM_APP_ID
         headers["X-ASBD-ID"] = "129477"
@@ -138,19 +146,39 @@ def _instagram_cookies(session_config: InstagramSession | None) -> dict:
     return cookies
 
 
-def _instagram_api_get(path: str, *, referer: str | None = None) -> dict:
+def _instagram_api_get(path: str, *, referer: str | None = None, retries: int = 3) -> dict:
     session_config = get_instagram_session()
-    response = requests.get(
-        path,
-        headers=_instagram_headers(session_config, referer=referer),
-        cookies=_instagram_cookies(session_config),
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("status") == "fail":
-        raise requests.RequestException(payload.get("message", "Instagram API request failed."))
-    return payload
+    last_error = None
+    
+    for attempt in range(retries):
+        proxy = proxy_manager.get_random_proxy()
+        try:
+            response = requests.get(
+                path,
+                headers=_instagram_headers(session_config, referer=referer),
+                cookies=_instagram_cookies(session_config),
+                proxy=proxy,
+                impersonate="chrome131",
+                timeout=REQUEST_TIMEOUT,
+            )
+            
+            if response.status_code == 429:
+                proxy_manager.mark_bad(proxy)
+                time.sleep(random.uniform(3, 7))
+                continue
+                
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("status") == "fail":
+                last_error = payload.get("message", "Instagram API request failed.")
+                continue
+            return payload
+        except Exception as e:
+            proxy_manager.mark_bad(proxy)
+            last_error = str(e)
+            time.sleep(random.uniform(2, 4))
+            
+    raise Exception(f"API failed after {retries} attempts. Last error: {last_error}")
 
 
 def get_instagram_session() -> InstagramSession | None:
@@ -201,13 +229,16 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple
         if max_id:
             path += f"&max_id={quote_plus(max_id)}"
             
-        payload = _instagram_api_get(
-            path,
-            referer=f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/",
-        )
-        results, pagination = _extract_reels_from_tag_payload(payload, hashtag)
-        if results:
-            return results, pagination
+        try:
+            payload = _instagram_api_get(
+                path,
+                referer=f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/",
+            )
+            results, pagination = _extract_reels_from_tag_payload(payload, hashtag)
+            if results:
+                return results, pagination
+        except:
+            pass
 
     url = f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/"
     response = _public_get(url)
@@ -230,7 +261,7 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple
             reel_urls.append({"url": full_url, "source_hashtag": hashtag})
 
     if reel_urls:
-        return reel_urls
+        return reel_urls, {"page": 1, "next_page": None, "more_available": False}
 
     pattern = re.compile(r'"(\\/reel\\/[^"]+)"')
     for match in pattern.findall(html):
@@ -259,14 +290,21 @@ def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
     payload = manual_metrics or {}
     try:
         session_config = get_instagram_session()
-        headers = _instagram_headers(session_config, referer=reel.url) if session_config and session_config.is_active else {
-            "User-Agent": USER_AGENT,
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        cookies = _instagram_cookies(session_config) if session_config and session_config.is_active else {}
+        headers = _instagram_headers(session_config, referer=reel.url)
+        cookies = _instagram_cookies(session_config)
+        proxy = proxy_manager.get_random_proxy()
         
-        # Bypassing the basic _public_get to use auth cookies if available
-        response = requests.get(reel.url, headers=headers, cookies=cookies, timeout=REQUEST_TIMEOUT)
+        response = requests.get(
+            reel.url, 
+            headers=headers, 
+            cookies=cookies, 
+            proxy=proxy,
+            impersonate="chrome131",
+            timeout=REQUEST_TIMEOUT
+        )
+        if response.status_code in (403, 429):
+            proxy_manager.mark_bad(proxy)
+            
         response.raise_for_status()
         
         html = response.text
@@ -306,7 +344,7 @@ def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
         apply_metrics(reel, views, likes, comments)
         reel.enrichment_status = "ok"
         reel.last_error = None
-    except requests.RequestException as exc:
+    except Exception as exc:
         reel.enrichment_status = "error"
         reel.last_error = str(exc)
         if payload:
@@ -325,7 +363,7 @@ def validate_instagram_session() -> tuple[bool, str]:
             f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name=instagram",
             referer=f"{INSTAGRAM_BASE}/explore/tags/instagram/",
         )
-    except (requests.RequestException, ValueError) as exc:
+    except Exception as exc:
         return False, f"Instagram request failed: {exc}"
     if not payload.get("data", {}).get("name"):
         return False, "Instagram session responded, but hashtag discovery data was missing."
@@ -402,7 +440,7 @@ def import_discovered_reels(hashtags: list[str], max_id_by_tag: dict[str, str] |
         for d in range(depth):
             try:
                 discovered, pagination = discover_reels_for_hashtag(tag, max_id=current_max_id)
-            except (requests.RequestException, InstagramLoginRequiredError) as exc:
+            except Exception as exc:
                 errors.append(f"#{tag} (page {d+1}): {exc}")
                 break
             
@@ -552,54 +590,209 @@ def refresh_all_reels() -> tuple[int, list[str]]:
     return refreshed, errors
 
 
-def get_user_id(username: str) -> str | None:
-    """Get the internal Instagram user ID from a username."""
-    # Method 1: web_profile_info
+def get_user_info(username: str) -> dict | None:
+    """Get full profile info for a user and update CreatorStats."""
+    from .models import CreatorStats
+    
+    data = None
+    # Method 1: web_profile_info (Most detailed)
     try:
         url = f"{INSTAGRAM_BASE}/api/v1/users/web_profile_info/?username={username}"
         payload = _instagram_api_get(url, referer=f"{INSTAGRAM_BASE}/{username}/")
-        uid = payload.get("data", {}).get("user", {}).get("id")
-        if uid: return uid
+        user_data = payload.get("data", {}).get("user", {})
+        if user_data:
+            data = {
+                "id": user_data.get("id"),
+                "username": user_data.get("username"),
+                "full_name": user_data.get("full_name"),
+                "profile_pic_url": user_data.get("profile_pic_url_hd") or user_data.get("profile_pic_url"),
+                "biography": user_data.get("biography"),
+                "external_url": user_data.get("external_url"),
+                "followers_count": user_data.get("edge_followed_by", {}).get("count"),
+                "following_count": user_data.get("edge_follow", {}).get("count"),
+                "posts_count": user_data.get("edge_owner_to_timeline_media", {}).get("count"),
+                "is_verified": user_data.get("is_verified"),
+            }
     except Exception:
         pass
         
-    # Method 2: topsearch
-    try:
-        url = f"{INSTAGRAM_BASE}/web/search/topsearch/?context=blended&query={username}"
-        payload = _instagram_api_get(url, referer=f"{INSTAGRAM_BASE}/")
-        for user_entry in payload.get("users", []):
-            u = user_entry.get("user", {})
-            if u.get("username") == username:
-                return u.get("pk")
-    except Exception:
-        pass
+    if not data:
+        # Fallback to HTML scraping via proxy
+        try:
+            response = _public_get(f"{INSTAGRAM_BASE}/{username}/")
+            html = response.text
+            # Simple regex extraction for ID if API fails
+            match = re.search(r'"(?:profile|user)_id":"(\d+)"', html)
+            uid = match.group(1) if match else None
+            if uid:
+                data = {"id": uid, "username": username}
+        except Exception:
+            pass
+
+    if data and data.get("username"):
+        # Update or create CreatorStats
+        stats = CreatorStats.query.filter_by(username=data["username"]).first() or CreatorStats(username=data["username"])
+        stats.full_name = data.get("full_name")
+        stats.profile_pic_url = data.get("profile_pic_url")
+        stats.biography = data.get("biography")
+        stats.external_url = data.get("external_url")
+        stats.followers_count = data.get("followers_count")
+        stats.following_count = data.get("following_count")
+        stats.posts_count = data.get("posts_count")
+        stats.is_verified = data.get("is_verified", False)
+        db.session.add(stats)
+        db.session.commit()
         
-    # Method 3: Scrape profile HTML for user ID
-    try:
-        response = _public_get(f"{INSTAGRAM_BASE}/{username}/")
-        html = response.text
-        # Look for "profile_id":"12345" or "user_id":"12345"
-        match = re.search(r'"(?:profile|user)_id":"(\d+)"', html)
-        if match:
-            return match.group(1)
-        # Look for "id":"12345" near the username
-        match = re.search(r'"id":"(\d+)","username":"' + username + r'"', html)
-        if match:
-            return match.group(1)
-    except Exception:
-        pass
-        
-    return None
+    return data
 
 
-def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int, list[str], list[Reel], str | None]:
-    """
-    Fetch reels directly from Instagram API using the authenticated session.
-    Mimics human scrolling by fetching batches with random delays.
-    """
-    import time
-    import random
+import os
+from pathlib import Path
+
+# Media storage configuration
+MEDIA_DIR = Path("instance") / "media"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+def download_media(reel_id: int, app_context):
+    """Download thumbnail and video for a reel to local storage."""
+    with app_context.app_context():
+        reel = db.session.get(Reel, reel_id)
+        if not reel: return
+
+        # 1. Download Thumbnail
+        if reel.thumbnail_url and not reel.local_thumb_path:
+            ext = "jpg"
+            filename = f"thumb_{reel.shortcode}_{reel.id}.{ext}"
+            filepath = MEDIA_DIR / filename
+            if not filepath.exists():
+                try:
+                    # Reuse raw request logic
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                        'Referer': 'https://www.instagram.com/',
+                    }
+                    proxies = proxy_manager.get_requests_proxy()
+                    resp = requests.get(reel.thumbnail_url, headers=headers, proxies=proxies, timeout=15)
+                    if resp.status_code == 200:
+                        filepath.write_bytes(resp.content)
+                        reel.local_thumb_path = f"media/{filename}"
+                        db.session.commit()
+                except Exception as e:
+                    print(f"Failed to download thumb for {reel.shortcode}: {e}")
+
+        # 2. Download Video (if applicable)
+        if reel.media_type == 'video' and reel.video_url and not reel.local_video_path:
+            filename = f"video_{reel.shortcode}_{reel.id}.mp4"
+            filepath = MEDIA_DIR / filename
+            if not filepath.exists():
+                try:
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                        'Referer': 'https://www.instagram.com/',
+                    }
+                    proxies = proxy_manager.get_requests_proxy()
+                    resp = requests.get(reel.video_url, headers=headers, proxies=proxies, timeout=30)
+                    if resp.status_code == 200:
+                        filepath.write_bytes(resp.content)
+                        reel.local_video_path = f"media/{filename}"
+                        db.session.commit()
+                except Exception as e:
+                    print(f"Failed to download video for {reel.shortcode}: {e}")
+
+        # 3. Download Carousel Images
+        if reel.media_type == 'carousel' and reel.carousel_json:
+            try:
+                urls = json.loads(reel.carousel_json)
+                local_paths = []
+                updated = False
+                
+                for i, url in enumerate(urls):
+                    if url.startswith('media/'): # Already local
+                        local_paths.append(url)
+                        continue
+                        
+                    filename = f"carousel_{reel.shortcode}_{reel.id}_{i}.jpg"
+                    filepath = MEDIA_DIR / filename
+                    
+                    if not filepath.exists():
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                            'Referer': 'https://www.instagram.com/',
+                        }
+                        proxies = proxy_manager.get_requests_proxy()
+                        resp = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+                        if resp.status_code == 200:
+                            filepath.write_bytes(resp.content)
+                            local_paths.append(f"media/{filename}")
+                            updated = True
+                        else:
+                            local_paths.append(url) # Keep original if failed
+                    else:
+                        local_paths.append(f"media/{filename}")
+                    
+                    time.sleep(0.5) # Anti-ban
+                
+                if updated:
+                    reel.carousel_json = json.dumps(local_paths)
+                    db.session.commit()
+            except Exception as e:
+                print(f"Carousel download failed for {reel.shortcode}: {e}")
+
+def _extract_media_type(media: dict) -> str:
+    """Determine if media is a video, image, or carousel."""
+    m_type = media.get("media_type")
+    if m_type == 1:
+        return "image"
+    if m_type == 2:
+        return "video"
+    if m_type == 8:
+        return "carousel"
     
+    # Fallback/alternative
+    if media.get("video_versions"):
+        return "video"
+    if media.get("carousel_media"):
+        return "carousel"
+    return "image"
+
+def _make_ig_request(url, headers, cookies, params=None, data=None, method="GET"):
+    """Internal helper to make IG requests with retries and proxy rotation."""
+    payload = None
+    last_exc = None
+    for retry in range(3):
+        proxy = None
+        try:
+            proxy = proxy_manager.get_random_proxy()
+            if method == "GET":
+                resp = requests.get(url, headers=headers, cookies=cookies, params=params, proxy=proxy, impersonate="chrome131", timeout=15)
+            else:
+                resp = requests.post(url, headers=headers, cookies=cookies, data=data, proxy=proxy, impersonate="chrome131", timeout=15)
+            
+            if resp.status_code == 200:
+                print(f"SUCCESS: {method} {url.split('/v1/')[1]} via {proxy.split('@')[1] if proxy else 'direct'}")
+                return resp.json(), None
+
+            if resp.status_code == 429:
+                proxy_manager.mark_bad(proxy)
+                print(f"RETRY: Rate limited (429) on proxy {proxy.split('@')[1] if proxy else 'direct'}. Retry {retry+1}/3")
+                time.sleep(1)
+                continue
+            
+            resp.raise_for_status()
+            return resp.json(), None
+        except Exception as e:
+            if proxy: proxy_manager.mark_bad(proxy)
+            print(f"RETRY: Request failed: {e}. Retry {retry+1}/3")
+            last_exc = e
+            time.sleep(0.5)
+    return None, last_exc
+
+def discover_reels_direct(username: str, max_id: str | None = None, app_context=None) -> tuple[int, list[str], list[Reel], str | None]:
+    """
+    Fetch all media (images, reels, carousels) directly from Instagram API.
+    Uses both feed and clips endpoints to ensure 100% coverage.
+    """
+    import threading
     errors = []
     imported = 0
     new_reels = []
@@ -608,106 +801,98 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
     # 1. Clean username
     username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
     
-    # 2. Get User ID
-    user_id = get_user_id(username)
-    if not user_id:
-        errors.append(f"Could not find ID for @{username}. Profile may be private or name changed.")
+    # 2. Get User Info & ID
+    user_info = get_user_info(username)
+    if not user_info or not user_info.get("id"):
+        errors.append(f"Could not find ID for @{username}. Profile may be private.")
         return 0, errors, [], None
         
+    user_id = user_info["id"]
     tag = f"creator:{username}"
     session_config = get_instagram_session()
     if not session_config or not session_config.is_active:
-        errors.append("No active Instagram session. Please connect your session first.")
+        errors.append("No active Instagram session.")
         return 0, errors, [], None
 
-    headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/{username}/reels/")
+    headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/{username}/")
     cookies = _instagram_cookies(session_config)
-    url = f"{INSTAGRAM_BASE}/api/v1/clips/user/"
+    
+    # We will alternate or fetch from both to be sure. 
+    # Feed is better for images, Clips is better for reels.
+    endpoints = [
+        f"{INSTAGRAM_BASE}/api/v1/feed/user/{user_id}/",
+        f"{INSTAGRAM_BASE}/api/v1/clips/user/"
+    ]
 
-    # If fresh search, try getting first few from profile info (faster, guaranteed)
-    if not current_max_id:
-        try:
-            profile_url = f"{INSTAGRAM_BASE}/api/v1/users/web_profile_info/?username={username}"
-            profile_payload = _instagram_api_get(profile_url, referer=f"{INSTAGRAM_BASE}/{username}/")
-            user_data = profile_payload.get("data", {}).get("user", {})
-            timeline = user_data.get("edge_owner_to_timeline_media", {})
-            for edge in timeline.get("edges", []):
-                node = edge.get("node", {})
-                if node.get("__typename") != "GraphVideo": continue
-                code = node.get("shortcode")
-                if not code: continue
-                full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
-                existing = Reel.query.filter_by(url=full_url).first()
-                if not existing:
-                    reel = Reel(
-                        source_hashtag=tag,
-                        url=full_url,
-                        shortcode=code,
-                        hashtags=tag,
-                        title=(node.get("edge_media_to_caption", {}).get("edges") or [{}])[0].get("node", {}).get("text"),
-                        creator=username,
-                        thumbnail_url=node.get("display_url"),
-                        enrichment_status="pending",
-                    )
-                    apply_metrics(reel, node.get("video_view_count"), node.get("edge_liked_by", {}).get("count"), None)
-                    db.session.add(reel)
-                    new_reels.append(reel)
-                    imported += 1
-            db.session.commit()
-        except: pass
+    from .models import HashtagSearchState
+    
+    for url in endpoints:
+        current_max_id = max_id if url == endpoints[0] else None # Reset max_id for second endpoint
+        is_clips = "clips" in url
+        
+        for page_num in range(50): # 50 batches per endpoint = 100 total
+            db.session.expire_all()
+            state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+            if state and state.status == 'cancelled':
+                return imported, errors, new_reels, None
 
-    # Human-like scrolling loop (up to 15 batches)
-    for page_num in range(15):
-        try:
-            data = {"target_user_id": str(user_id), "page_size": 24}
+            params = {"count": 24} if not is_clips else {"target_user_id": str(user_id), "page_size": 24}
             if current_max_id:
-                data["max_id"] = str(current_max_id)
+                params["max_id"] = str(current_max_id)
             
-            if session_config.csrftoken:
-                data["_csrftoken"] = session_config.csrftoken
+            data = None
+            method = "GET"
+            if is_clips:
+                method = "POST"
+                data = params
+                params = None
+
+            payload, exc = _make_ig_request(url, headers, cookies, params=params, data=data, method=method)
             
-            response = requests.post(url, headers=headers, cookies=cookies, data=data, timeout=REQUEST_TIMEOUT)
-            
-            if response.status_code == 429:
-                errors.append("Instagram rate limit reached (429).")
-                break
-            if response.status_code == 400:
-                msg = "Bad Request (400)."
-                try:
-                    err_json = response.json()
-                    print(f"DEBUG: 400 Error JSON: {err_json}")
-                    if err_json.get("message"):
-                        msg += f" Reason: {err_json['message']}"
-                except:
-                    print(f"DEBUG: 400 Error Body: {response.text[:200]}")
-                errors.append(f"{msg} Your session might need a refresh or Instagram blocked this batch.")
+            if not payload:
+                if exc: errors.append(f"Batch failed: {exc}")
                 break
 
-            response.raise_for_status()
-            payload = response.json()
             items = payload.get("items", [])
             if not items: break
                 
             for item in items:
-                # The items are wrapped in a 'media' object
                 media = item.get("media", item) 
                 code = media.get("code")
                 if not code: continue
                 
-                full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
+                m_type = _extract_media_type(media)
+                # If it's a video, check if it's a Reel (clips)
+                is_reel = is_clips or (m_type == "video" and media.get("is_dash_eligible"))
+                
+                if is_reel:
+                    full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
+                    m_type = "video"
+                else:
+                    full_url = f"{INSTAGRAM_BASE}/p/{code}/"
+                
                 views = media.get("play_count") or media.get("view_count")
                 likes = media.get("like_count")
                 comments = media.get("comment_count")
                 
                 existing = Reel.query.filter_by(url=full_url).first()
+                
+                # Extract carousel images if present
+                carousel_urls = []
+                if m_type == "carousel" and media.get("carousel_media"):
+                    for sub in media.get("carousel_media"):
+                        # Get best thumbnail/image for this slide
+                        c_thumb = _thumbnail_from_media(sub)
+                        if c_thumb: carousel_urls.append(c_thumb)
+                
                 if existing:
                     if tag not in existing.hashtag_list:
                         merged = existing.hashtag_list + [tag]
                         existing.hashtags = ", ".join(dict.fromkeys(merged))
                     apply_metrics(existing, views, likes, comments)
-                    thumb = _thumbnail_from_media(media)
-                    if thumb: existing.thumbnail_url = thumb
-                    existing.enrichment_status = "ok"
+                    existing.media_type = m_type
+                    if carousel_urls:
+                        existing.carousel_json = json.dumps(carousel_urls)
                     db.session.add(existing)
                     new_reels.append(existing)
                     continue
@@ -717,30 +902,41 @@ def discover_reels_direct(username: str, max_id: str | None = None) -> tuple[int
                     url=full_url,
                     shortcode=code,
                     hashtags=tag,
+                    media_type=m_type,
+                    carousel_json=json.dumps(carousel_urls) if carousel_urls else None,
                     title=media.get("caption", {}).get("text") if media.get("caption") else None,
                     creator=username,
                     thumbnail_url=_thumbnail_from_media(media),
-                    video_url=_video_url_from_media(media),
+                    video_url=_video_url_from_media(media) if m_type == "video" else None,
                     enrichment_status="ok",
                 )
                 apply_metrics(reel, views, likes, comments)
                 db.session.add(reel)
+                db.session.flush() # Get ID for thread
+                
+                if app_context:
+                    threading.Thread(target=download_media, args=(reel.id, app_context)).start()
+
                 new_reels.append(reel)
                 imported += 1
             
             db.session.commit()
-            p_info = payload.get("paging_info", {})
-            current_max_id = p_info.get("max_id") or payload.get("next_max_id")
-            print(f"DEBUG: Batch {page_num+1} finished. Next max_id: {current_max_id}")
-            if not current_max_id or not p_info.get("more_available", True): break
-            time.sleep(random.uniform(2.5, 5.0))
             
-        except Exception as exc:
-            print(f"DEBUG: Scroll batch {page_num+1} exception: {exc}")
-            errors.append(f"Scroll interrupted: {exc}")
-            break
+            # Paging
+            if is_clips:
+                p_info = payload.get("paging_info", {})
+                current_max_id = p_info.get("max_id") or payload.get("next_max_id")
+                more = p_info.get("more_available", True)
+            else:
+                current_max_id = payload.get("next_max_id")
+                more = payload.get("more_available", True)
+                
+            if not current_max_id or not more: break
+            time.sleep(random.uniform(1.0, 2.5)) # Faster but still safe
             
     return imported, errors, new_reels, current_max_id
+
+
 
 
 def discover_reels_from_web(keyword: str, limit: int = 50, tag_prefix: str = "web") -> tuple[int, list[str], list[Reel], str | None]:

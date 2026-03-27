@@ -24,6 +24,7 @@ from .services import (
     save_instagram_session,
     validate_instagram_session,
 )
+from .proxies import proxy_manager
 
 bp = Blueprint('main', __name__)
 
@@ -151,24 +152,50 @@ def dashboard():
     )
 
 
+from flask import send_from_directory
+
+@bp.route('/media/<path:filename>')
+def serve_media(filename):
+    """Serve downloaded images and videos."""
+    return send_from_directory(os.path.join(current_app.instance_path, 'media'), filename)
+
 @bp.route('/proxy-image')
 def proxy_image():
     url = request.args.get('url')
     if not url:
         abort(400)
-    
+
+    # Check if we have this cached locally
+    from .models import Reel
+    reel = Reel.query.filter_by(thumbnail_url=url).first()
+    if reel and reel.local_thumb_path:
+        return redirect(url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')))
+
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Referer': 'https://www.instagram.com/',
     }
-    
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        return Response(resp.content, content_type=resp.headers.get('Content-Type'))
-    except:
-        abort(404)
 
+    try:
+        # First try without proxy for speed, many CDNs don't block simple GETs
+        resp = requests.get(url, headers=headers, timeout=5, stream=True)
+        if resp.status_code == 200:
+            return Response(
+                stream_with_context(resp.iter_content(chunk_size=10240)),
+                content_type=resp.headers.get('Content-Type')
+            )
+
+        # If blocked, try with proxy
+        proxies = proxy_manager.get_requests_proxy()
+        resp = requests.get(url, headers=headers, proxies=proxies, timeout=10, stream=True)
+        resp.raise_for_status()
+        return Response(
+            stream_with_context(resp.iter_content(chunk_size=10240)),
+            content_type=resp.headers.get('Content-Type')
+        )
+    except Exception as e:
+        # Final fallback: redirect to the URL and hope the browser can handle it
+        return redirect(url)
 
 @bp.route('/library')
 def library():
@@ -311,7 +338,15 @@ def discover_more(hashtag: str):
 @bp.route('/reels/<int:reel_id>/stream')
 def stream_reel_video(reel_id: int):
     reel = db.session.get(Reel, reel_id)
-    if reel is None or not reel.video_url:
+    if reel is None:
+        abort(404)
+
+    # 1. Try local storage first
+    if reel.local_video_path:
+        filename = reel.local_video_path.replace('media/', '')
+        return redirect(url_for('main.serve_media', filename=filename))
+
+    if not reel.video_url:
         abort(404)
 
     def get_upstream(url):
@@ -329,7 +364,8 @@ def stream_reel_video(reel_id: int):
         if request.headers.get('Range'):
             headers['Range'] = request.headers['Range']
         
-        return requests.get(url, headers=headers, stream=True, timeout=15)
+        proxies = proxy_manager.get_requests_proxy()
+        return requests.get(url, headers=headers, proxies=proxies, stream=True, timeout=15)
 
     try:
         upstream = get_upstream(reel.video_url)
@@ -379,7 +415,7 @@ def async_scroll_reels(app, username, max_id=None):
         state.last_error = None
         db.session.commit()
         
-        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id)
+        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id, app_context=app)
         
         state.next_max_id = next_max_id
         state.more_available = bool(next_max_id)
@@ -409,6 +445,7 @@ def async_scroll_reels(app, username, max_id=None):
 
 @bp.route('/creator-search', methods=['GET', 'POST'])
 def creator_search():
+    from .models import CreatorStats
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         max_id = request.form.get('max_id') # For continuing a scroll
@@ -437,7 +474,7 @@ def creator_search():
         return redirect(url_for('main.creator_search', active_creator=clean_username))
 
     active_creator = request.args.get('active_creator', '')
-    limit = request.args.get('limit', type=int) or 20
+    limit = request.args.get('limit', type=int) or 100
     sort_by = request.args.get('sort_by', 'views_desc')
     
     search_query = HashtagSearchState.query.filter(HashtagSearchState.hashtag.startswith('creator:')).order_by(HashtagSearchState.updated_at.desc())
@@ -447,14 +484,18 @@ def creator_search():
     creator_stats_list = []
     if not active_creator:
         for state in recent_searches:
+            uname = state.hashtag.replace('creator:', '')
             creator_reels = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).all()
             total = len(creator_reels)
             
             processed = sum(1 for r in creator_reels if r.enrichment_status != 'pending')
             progress = int((processed / max(total, 1)) * 100)
             
+            # Fetch profile info if available
+            profile = CreatorStats.query.filter_by(username=uname).first()
+
             creator_stats_list.append({
-                'username': state.hashtag.replace('creator:', ''),
+                'username': uname,
                 'total_reels': total,
                 'processed_reels': processed,
                 'progress': progress,
@@ -462,11 +503,14 @@ def creator_search():
                 'total_views': sum((r.last_views or 0) for r in creator_reels),
                 'last_updated': state.updated_at,
                 'next_max_id': state.next_max_id,
-                'more_available': state.more_available
+                'more_available': state.more_available,
+                'profile_pic': profile.profile_pic_url if profile else None,
+                'followers': profile.followers_count if profile else None
             })
 
     reels = []
     has_more_local = False
+    profile_data = None
     stats = {
         'reel_count': 0, 
         'processed_reels': 0, 
@@ -488,8 +532,10 @@ def creator_search():
             db.session.add(state)
             db.session.commit()
             
-        all_group_reels = Reel.query.filter(Reel.hashtags.like(f"%{tag}%")).all()
-        query = Reel.query.filter(Reel.hashtags.like(f"%{tag}%"), Reel.enrichment_status == 'ok')
+        profile_data = CreatorStats.query.filter_by(username=active_creator).first()
+        
+        all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).all()
+        query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
         
         if sort_by == 'views_desc':
             query = query.order_by(Reel.last_views.desc().nullslast())
@@ -521,6 +567,7 @@ def creator_search():
         'creator_search.html',
         reels=reels,
         active_creator=active_creator,
+        profile_data=profile_data,
         recent_searches=recent_searches,
         creator_stats_list=creator_stats_list,
         any_scrolling=any_scrolling,
@@ -529,6 +576,52 @@ def creator_search():
         sort_by=sort_by,
         has_more_local=has_more_local
     )
+
+
+@bp.route('/reels/<int:reel_id>/download')
+def download_reel(reel_id: int):
+    reel = db.session.get(Reel, reel_id)
+    if reel is None or not reel.video_url:
+        abort(404)
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Referer': 'https://www.instagram.com/',
+    }
+    
+    try:
+        proxies = proxy_manager.get_requests_proxy()
+        resp = requests.get(reel.video_url, headers=headers, proxies=proxies, stream=True, timeout=15)
+        resp.raise_for_status()
+        
+        filename = f"{reel.creator or 'instagram'}_{reel.shortcode or reel_id}.mp4"
+        
+        return Response(
+            stream_with_context(resp.iter_content(chunk_size=1024 * 1024)),
+            content_type=resp.headers.get('Content-Type', 'video/mp4'),
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": resp.headers.get('Content-Length')
+            }
+        )
+    except:
+        # If the direct URL fails, try to refresh once
+        from .services import refresh_reel
+        refresh_reel(reel)
+        try:
+            proxies = proxy_manager.get_requests_proxy()
+            resp = requests.get(reel.video_url, headers=headers, proxies=proxies, stream=True, timeout=15)
+            resp.raise_for_status()
+            filename = f"{reel.creator or 'instagram'}_{reel.shortcode or reel_id}.mp4"
+            return Response(
+                stream_with_context(resp.iter_content(chunk_size=1024 * 1024)),
+                content_type=resp.headers.get('Content-Type', 'video/mp4'),
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename}"
+                }
+            )
+        except:
+            abort(403)
 
 
 @bp.route('/reels/<int:reel_id>', methods=['GET', 'POST'])
@@ -641,6 +734,47 @@ def get_notifications():
         db.session.commit()
         
     return jsonify(results)
+
+@bp.route('/api/cancel-creator-search/<string:username>')
+def cancel_creator_search(username: str):
+    from .models import HashtagSearchState
+    tag = f"creator:{username}"
+    state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+    if state and state.status == 'scrolling':
+        state.status = 'cancelled'
+        db.session.commit()
+        return jsonify({'status': 'success', 'message': 'Search cancellation requested.'})
+    return jsonify({'status': 'error', 'message': 'Search not in progress.'}), 400
+
+
+@bp.route('/api/creator-status/<string:username>')
+def get_creator_status(username: str):
+    from .models import HashtagSearchState, Reel, CreatorStats
+    tag = f"creator:{username}"
+    state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+    if not state:
+        return jsonify({'error': 'Not found'}), 404
+    
+    all_group_reels = Reel.query.filter(Reel.hashtags.like(f"%{tag}%")).all()
+    total = len(all_group_reels)
+    processed = sum(1 for r in all_group_reels if r.enrichment_status != 'pending')
+    progress = int((processed / max(total, 1)) * 100)
+    
+    profile = CreatorStats.query.filter_by(username=username).first()
+    
+    return jsonify({
+        'username': username,
+        'status': state.status,
+        'progress': progress,
+        'total_reels': total,
+        'processed_reels': processed,
+        'more_available': state.more_available,
+        'next_max_id': state.next_max_id,
+        'last_error': state.last_error,
+        'followers': profile.followers_count if profile else None,
+        'profile_pic': profile.profile_pic_url if profile else None
+    })
+
 
 @bp.route('/web-search', methods=['GET', 'POST'])
 def web_search():

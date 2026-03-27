@@ -25,6 +25,10 @@ class Reel(db.Model):
     hook = db.Column(db.String(255))
     cta = db.Column(db.String(120))
     format = db.Column(db.String(120))
+    media_type = db.Column(db.String(20), default='video') # video, image, carousel
+    carousel_json = db.Column(db.Text) # JSON list of image/video URLs
+    local_thumb_path = db.Column(db.String(500))
+    local_video_path = db.Column(db.String(500))
     notes = db.Column(db.Text)
     last_views = db.Column(db.Integer)
     last_likes = db.Column(db.Integer)
@@ -90,8 +94,22 @@ class HashtagSearchState(db.Model):
     next_page = db.Column(db.Integer)
     next_max_id = db.Column(db.Text)
     more_available = db.Column(db.Boolean, default=False, nullable=False)
-    status = db.Column(db.String(20), default='ready') # scrolling, done, error
+    status = db.Column(db.String(20), default='ready') # scrolling, done, error, cancelled
     last_error = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class CreatorStats(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    full_name = db.Column(db.String(255))
+    profile_pic_url = db.Column(db.Text)
+    biography = db.Column(db.Text)
+    external_url = db.Column(db.String(500))
+    followers_count = db.Column(db.Integer)
+    following_count = db.Column(db.Integer)
+    posts_count = db.Column(db.Integer)
+    is_verified = db.Column(db.Boolean, default=False)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
