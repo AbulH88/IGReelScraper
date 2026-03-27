@@ -65,6 +65,7 @@ echo Starting IGReelScraper at http://%HOST%:%PORT%
 
 set FLASK_APP=app.py
 set FLASK_DEBUG=1
+set SSLKEYLOGFILE=
 
 "%FLASK%" run --host=%HOST% --port=%PORT%
 pause

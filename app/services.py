@@ -11,8 +11,12 @@ from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 from ddgs import DDGS
+from concurrent.futures import ThreadPoolExecutor
 from .models import InstagramSession, Reel, ReelSnapshot, db
 from .proxies import proxy_manager
+
+# Global thread pool for highly concurrent media downloading and enrichment
+worker_pool = ThreadPoolExecutor(max_workers=50)
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 REQUEST_TIMEOUT = 30
@@ -225,7 +229,8 @@ def clear_instagram_session() -> None:
 
 def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_context=None) -> tuple[int, list[str], list[Reel], str | None]:
     """
-    Fetch all media (images, reels, carousels) for a hashtag directly from Instagram API.
+    Fetch all media for a hashtag using the modern 'sections' API for deeper results.
+    Uses 'triangulation' strategy: rotating proxies every single batch to evade detection.
     """
     import threading
     errors = []
@@ -233,64 +238,67 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
     new_reels = []
     current_max_id = max_id
     
-    tag = hashtag.strip().lstrip('#')
-    source_tag = f"#{tag}"
+    tag_name = hashtag.strip().lstrip('#')
+    source_tag = f"#{tag_name}"
     session_config = get_instagram_session()
     if not session_config or not session_config.is_active:
         errors.append("No active Instagram session.")
         return 0, errors, [], None
 
-    headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/explore/tags/{tag}/")
+    headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/explore/tags/{tag_name}/")
     cookies = _instagram_cookies(session_config)
-    url = f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name={tag}"
+    
+    # Modern Sections API (Used by mobile and web for deeper pagination)
+    url = f"{INSTAGRAM_BASE}/api/v1/tags/{tag_name}/sections/"
 
     from .models import HashtagSearchState
     
-    # Scrolling loop (up to 20 batches for hashtags - they are denser)
-    for page_num in range(20):
+    # Deeper crawling: up to 50 batches (Approx 2000-3000 items)
+    for page_num in range(50):
         db.session.expire_all()
         state = HashtagSearchState.query.filter_by(hashtag=source_tag).first()
         if state and state.status == 'cancelled':
             return imported, errors, new_reels, None
 
-        params = {}
+        # Triangulation: Mandatory proxy rotation for every single page
+        data = {
+            "tab": "top",
+            "count": 50,
+        }
         if current_max_id:
-            params["max_id"] = str(current_max_id)
+            data["max_id"] = str(current_max_id)
         
-        payload, exc = _make_ig_request(url, headers, cookies, params=params)
+        # Sections API usually requires POST
+        payload, exc = _make_ig_request(url, headers, cookies, data=data, method="POST")
         
         if not payload:
             if exc: errors.append(f"Batch failed: {exc}")
             break
 
-        # Hashtag payload has a different structure: data -> recent -> sections
-        sections = payload.get("data", {}).get("recent", {}).get("sections", [])
+        sections = payload.get("sections", [])
         if not sections:
-            # Try top posts if recent is empty
-            sections = payload.get("data", {}).get("top", {}).get("sections", [])
+            break
             
-        found_any = False
+        found_in_batch = 0
         for section in sections:
             layout_content = section.get("layout_content", {})
-            # Layout content can have 'medias' (list of wraps) or 'fill_items'
-            medias = layout_content.get("medias", [])
+            # Also check 'fill_items' which sometimes contains reels in grid view
+            medias = layout_content.get("medias", []) + layout_content.get("fill_items", [])
             for wrap in medias:
                 media = wrap.get("media")
                 if not media: continue
-                found_any = True
                 
                 code = media.get("code")
                 if not code: continue
                 
                 m_type = _extract_media_type(media)
-                # If it's a video, check if it's a Reel
-                is_reel = (m_type == "video" and (media.get("is_dash_eligible") or media.get("product_type") == "clips"))
                 
-                if is_reel:
-                    full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
-                    m_type = "video"
-                else:
-                    full_url = f"{INSTAGRAM_BASE}/p/{code}/"
+                # USER REQUEST: Hashtag search should only include videos
+                if m_type != "video":
+                    continue
+
+                full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
+                m_type = "video"
                 
                 views = media.get("play_count") or media.get("view_count")
                 likes = media.get("like_count")
@@ -335,19 +343,26 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
                 db.session.flush()
                 
                 if app_context:
-                    threading.Thread(target=download_media, args=(reel.id, app_context)).start()
+                    worker_pool.submit(download_media, reel.id, app_context)
+                    # If views are missing, queue for deep enrichment
+                    if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
+                        worker_pool.submit(_deep_enrich_task, reel.id, app_context)
 
                 new_reels.append(reel)
                 imported += 1
+                found_in_batch += 1
         
         db.session.commit()
         
-        # Paging for hashtag
-        current_max_id = payload.get("data", {}).get("recent", {}).get("next_max_id")
-        more = payload.get("data", {}).get("recent", {}).get("more_available", False)
+        # Paging for Sections API
+        current_max_id = payload.get("next_max_id")
+        more = payload.get("more_available", False)
         
-        if not current_max_id or not more or not found_any: break
-        time.sleep(random.uniform(1.0, 2.5))
+        if not current_max_id or not more: 
+            break
+            
+        # Fast pagination using rotating proxies
+        time.sleep(random.uniform(0.5, 1.5))
             
     return imported, errors, new_reels, current_max_id
 
@@ -804,6 +819,23 @@ def download_media(reel_id: int, app_context):
             except Exception as e:
                 print(f"Carousel download failed for {reel.shortcode}: {e}")
 
+def _deep_enrich_task(reel_id: int, app_context):
+    """Background task to fetch missing views/likes for a specific item."""
+    with app_context.app_context():
+        reel = db.session.get(Reel, reel_id)
+        if not reel: return
+        
+        # Only enrich if metrics are missing
+        if reel.last_views is not None and reel.last_views > 0:
+            return
+            
+        try:
+            # reuse enrich_reel logic
+            enrich_reel(reel)
+            print(f"Deep enriched {reel.shortcode}: {reel.last_views} views found.")
+        except Exception as e:
+            print(f"Deep enrichment failed for {reel.shortcode}: {e}")
+
 def _extract_media_type(media: dict) -> str:
     """Determine if media is a video, image, or carousel."""
     m_type = media.get("media_type")
@@ -981,7 +1013,10 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                 db.session.flush() # Get ID for thread
                 
                 if app_context:
-                    threading.Thread(target=download_media, args=(reel.id, app_context)).start()
+                    worker_pool.submit(download_media, reel.id, app_context)
+                    # If views are missing, queue for deep enrichment
+                    if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
+                        worker_pool.submit(_deep_enrich_task, reel.id, app_context)
 
                 new_reels.append(reel)
                 imported += 1
@@ -998,7 +1033,7 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                 more = payload.get("more_available", True)
                 
             if not current_max_id or not more: break
-            time.sleep(random.uniform(1.0, 2.5)) # Faster but still safe
+            time.sleep(random.uniform(0.5, 1.5)) # Accelerated pagination
             
     return imported, errors, new_reels, current_max_id
 

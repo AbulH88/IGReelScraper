@@ -110,13 +110,8 @@
                 <div class="profile-tabs border-top bg-white">
                     <ul class="nav nav-tabs border-0 px-4" id="profileTab" role="tablist">
                         <li class="nav-item">
-                            <a class="nav-link active py-3 font-weight-bold border-0" id="videos-tab" data-toggle="tab" href="#videos-content" role="tab" style="color: #3b82f6; border-bottom: 3px solid #3b82f6 !important;">
-                                <i class="fa fa-video-camera mr-2"></i> Videos
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link py-3 font-weight-bold border-0" id="images-tab" data-toggle="tab" href="#images-content" role="tab" style="color: #64748b;">
-                                <i class="fa fa-camera mr-2"></i> Images
+                            <a class="nav-link active py-3 font-weight-bold border-0" id="reels-tab" data-toggle="tab" href="#reels-content" role="tab" style="color: #3b82f6; border-bottom: 3px solid #3b82f6 !important;">
+                                <i class="fa fa-video-camera mr-2"></i> Reels Found
                             </a>
                         </li>
                     </ul>
@@ -135,7 +130,7 @@
                     <div>
                         <h6 class="font-weight-bold m-0" id="progress-status-text">
                             {% if stats.status == 'scrolling' %}
-                            <i class="fa fa-spinner fa-spin mr-2 text-primary"></i> Searching hashtag...
+                            <i class="fa fa-spinner fa-spin mr-2 text-primary"></i> Searching hashtag for Reels...
                             {% elif stats.status == 'cancelled' %}
                             <i class="fa fa-ban mr-2 text-danger"></i> Search cancelled
                             {% else %}
@@ -143,15 +138,13 @@
                             {% endif %}
                         </h6>
                         <small class="text-muted" id="progress-detail-text">
-                            Found <span id="progress-reel-count">{{ stats.count }}</span> items so far
+                            Found <span id="progress-reel-count">{{ stats.count }}</span> reels so far
                         </small>
                     </div>
                     <div class="text-right d-flex align-items-center">
-                        {% if stats.status == 'scrolling' %}
-                        <button id="stop-search-btn" class="btn btn-xs btn-outline-danger py-0 px-2 mr-3 rounded-pill" style="font-size: 0.7rem; height: 20px;">
+                        <button id="stop-search-btn" class="btn btn-xs btn-outline-danger py-0 px-2 mr-3 rounded-pill {% if stats.status != 'scrolling' %}d-none{% endif %}" style="font-size: 0.7rem; height: 20px;">
                             <i class="fa fa-stop mr-1"></i> Stop Search
                         </button>
-                        {% endif %}
                         <span class="font-weight-bold text-primary" id="progress-percent-text">{{ stats.progress }}%</span>
                     </div>
                 </div>
@@ -160,25 +153,22 @@
                          role="progressbar" style="width: {{ stats.progress }}%; border-radius: 10px; background-color: #3b82f6 !important;"></div>
                 </div>
                 <div id="refresh-notice" class="mt-3 small text-center text-muted d-none">
-                    <i class="fa fa-info-circle mr-1"></i> New items found! <a href="javascript:location.reload()" class="font-weight-bold text-primary">Click to refresh view</a>
+                    <i class="fa fa-info-circle mr-1"></i> New reels found! <a href="javascript:location.reload()" class="font-weight-bold text-primary">Click to refresh view</a>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="alert alert-info py-2 small mb-4">
-        <i class="fa fa-database mr-1"></i> <strong>Local Sync:</strong> {{ stats.count }} total items found for this hashtag. 
+        <i class="fa fa-database mr-1"></i> <strong>Local Sync:</strong> {{ stats.count }} total reels found for this hashtag. 
         (Showing {{ reels|length }} in current view)
     </div>
 
-    {% set videos = reels|selectattr('media_type', 'equalto', 'video')|list %}
-    {% set images = reels|rejectattr('media_type', 'equalto', 'video')|list %}
-
-    <!-- VIDEOS TAB -->
-    <div class="tab-pane fade show active" id="videos-content" role="tabpanel">
+    <!-- REELS TAB -->
+    <div class="tab-pane fade show active" id="reels-content" role="tabpanel">
         <div class="row mb-3 align-items-center">
             <div class="col">
-                <h5 class="font-weight-bold m-0"><span id="tracked-videos-count">{{ videos|length }}</span> Tracked Videos</h5>
+                <h5 class="font-weight-bold m-0"><span id="tracked-reels-count">{{ reels|length }}</span> Tracked Reels</h5>
             </div>
             <div class="col-auto">
                 <div class="d-flex align-items-center">
@@ -201,8 +191,8 @@
 
         <div class="results-container">
             <div class="row grid-view">
-                {% if videos %}
-                  {% for reel in videos %}
+                {% if reels %}
+                  {% for reel in reels %}
                   <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
                     <div class="card h-100 border-0 shadow-sm reel-card overflow-hidden" style="border-radius: 12px; transition: transform 0.3s ease;">
                       <div class="position-relative aspect-9-16 bg-black" style="aspect-ratio: 9/16; overflow: hidden;">
@@ -211,7 +201,13 @@
                         {% endif %}
                         <div class="card-img-overlay d-flex flex-column justify-content-between p-3" style="background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.8) 100%);">
                             <div class="text-right">
-                                <span class="badge badge-dark bg-opacity-50 rounded-pill px-2 py-1" style="background: rgba(0,0,0,0.5);"><i class="fa fa-play mr-1"></i> {{ (reel.last_views|compact_number) if reel.last_views else 0 }}</span>
+                                <span class="badge badge-dark bg-opacity-50 rounded-pill px-2 py-1" style="background: rgba(0,0,0,0.5);">
+                                    {% if reel.last_views and reel.last_views > 0 %}
+                                    <i class="fa fa-play mr-1"></i> {{ (reel.last_views|compact_number) }}
+                                    {% else %}
+                                    <i class="fa fa-spinner fa-spin mr-1"></i> Syncing...
+                                    {% endif %}
+                                </span>
                             </div>
                             <div class="text-white">
                                 <div class="font-weight-bold small line-clamp-2 mb-2">@{{ reel.creator }} - {{ reel.title or reel.shortcode or 'Untitled' }}</div>
@@ -240,7 +236,7 @@
                   {% endfor %}
                 {% else %}
                   <div class="col-12 text-center py-5">
-                      <p class="text-muted">No videos found for this hashtag.</p>
+                      <p class="text-muted">No reels found for this hashtag.</p>
                   </div>
                 {% endif %}
             </div>
@@ -258,7 +254,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for reel in videos %}
+                            {% for reel in reels %}
                             <tr>
                                 <td class="px-4">
                                     <div class="d-flex align-items-center py-2">
@@ -282,82 +278,6 @@
                         </tbody>
                     </table>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- IMAGES TAB -->
-    <div class="tab-pane fade" id="images-content" role="tabpanel">
-        <div class="row mb-3 align-items-center">
-            <div class="col">
-                <h5 class="font-weight-bold m-0"><span id="tracked-images-count">{{ images|length }}</span> Tracked Images</h5>
-            </div>
-            <div class="col-auto">
-                <div class="d-flex align-items-center">
-                    <div class="view-switcher mr-3 d-none d-md-flex">
-                        <button type="button" class="btn btn-light btn-sm mr-2 rounded-lg active view-grid-btn"><i class="fa fa-th"></i></button>
-                        <button type="button" class="btn btn-light btn-sm rounded-lg view-list-btn"><i class="fa fa-list"></i></button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="results-container">
-            <div class="row grid-view">
-                {% if images %}
-                  {% for reel in images %}
-                  <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
-                    <div class="card h-100 border-0 shadow-sm reel-card overflow-hidden" style="border-radius: 12px; transition: transform 0.3s ease;">
-                      <div class="position-relative aspect-9-16 bg-black" style="aspect-ratio: 9/16; overflow: hidden;">
-                        {% if reel.thumbnail_url %}
-                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
-                        {% endif %}
-                        <div class="card-img-overlay d-flex flex-column justify-content-between p-3" style="background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.8) 100%);">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <span class="badge badge-light rounded-pill px-2 py-1 shadow-sm" style="font-size: 0.7rem;">
-                                    {% if reel.media_type == 'carousel' %}
-                                    <i class="fa fa-clone mr-1"></i> Carousel
-                                    {% else %}
-                                    <i class="fa fa-camera mr-1"></i> Image
-                                    {% endif %}
-                                </span>
-                                <span class="badge badge-dark bg-opacity-50 rounded-pill px-2 py-1" style="background: rgba(0,0,0,0.5);"><i class="fa fa-eye mr-1"></i> {{ (reel.last_views|compact_number) if reel.last_views else 0 }}</span>
-                            </div>
-                            <div class="text-white">
-                                <div class="font-weight-bold small line-clamp-2 mb-2">@{{ reel.creator }} - {{ reel.title or reel.shortcode or 'Untitled' }}</div>
-                                <div class="d-flex justify-content-between align-items-center">
-                                    {% if reel.media_type == 'carousel' %}
-                                    <button type="button" class="btn btn-white btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; padding: 0;"
-                                            data-media-type="carousel"
-                                            data-carousel-data='{{ reel.carousel_json|safe if reel.carousel_json else "[]" }}'
-                                            data-play-title="{{ reel.title or reel.shortcode or 'Carousel' }}"
-                                            onclick="openPreviewFromButton(this)">
-                                        <i class="fa fa-clone"></i>
-                                    </button>
-                                    {% else %}
-                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-white btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
-                                        <i class="fa fa-external-link"></i>
-                                    </a>
-                                    {% endif %}
-                                    <a href="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" target="_blank" class="btn btn-light btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;" title="View Image">
-                                        <i class="fa fa-image"></i>
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                      </div>
-                      <div class="card-footer bg-white border-0 py-2 px-3 d-flex justify-content-between small text-muted">
-                        <span><i class="fa fa-heart-o mr-1"></i>{{ (reel.last_likes|compact_number) if reel.last_likes else 0 }}</span>
-                        <a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" class="text-muted"><i class="fa fa-line-chart"></i></a>
-                      </div>
-                    </div>
-                  </div>
-                  {% endfor %}
-                {% else %}
-                  <div class="col-12 text-center py-5">
-                      <p class="text-muted">No images found for this hashtag.</p>
-                  </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -456,6 +376,7 @@
           if (progressStatus) {
             if (data.status === 'scrolling') {
               progressStatus.innerHTML = '<i class="fa fa-spinner fa-spin mr-2 text-primary"></i> Searching hashtag...';
+              if (stopBtn) stopBtn.classList.remove('d-none');
             } else if (data.status === 'cancelled') {
               progressStatus.innerHTML = '<i class="fa fa-ban mr-2 text-danger"></i> Search cancelled';
               if (stopBtn) stopBtn.classList.add('d-none');
