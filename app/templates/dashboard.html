@@ -1,626 +1,170 @@
 {% extends 'base.html' %}
 
-{% macro action_button(label, href=None, secondary=False, ghost=False, target=None) %}
-  {% if href %}
-    <a class="{% if ghost %}btn-beautiful-ghost{% elif secondary %}btn-beautiful-secondary{% else %}btn-beautiful{% endif %}" href="{{ href }}"{% if target %} target="{{ target }}" rel="noreferrer"{% endif %}>{{ label }}</a>
-  {% endif %}
-{% endmacro %}
-
 {% block content %}
 <div class="row">
-  <div class="col-12">
-    <div class="card">
-      <div class="card-body pb-0">
-        <div class="mb-4">
-          <h4 class="mb-1">Reel discovery command center</h4>
-          <p class="mb-2">Run authenticated hashtag discovery, move through each next page, and review one focused hashtag batch at a time.</p>
-          <div class="d-flex flex-wrap align-items-center mt-3">
-            {% for group in grouped_reels %}
-              <a href="{{ url_for('main.dashboard', hashtags=active_hashtags|join(','), active_tag=group.hashtag) }}" 
-                 class="group-chip {% if selected_hashtag == group.hashtag %}active{% endif %}">
-                <i class="fa fa-hashtag"></i> {{ group.hashtag }}
-              </a>
-            {% endfor %}
-          </div>
-          <h3 class="m-0 mt-3">
-            {% if active_group and active_group.state %}
-              Current page {{ active_group.state.page }}
-            {% elif clear_view %}
-              Search cleared
-            {% else %}
-              Start with a hashtag search
-            {% endif %}
-          </h3>
+    <!-- STATS OVERVIEW -->
+    <div class="col-xl-3 col-lg-6 col-sm-6 mb-4">
+        <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p class="text-muted small text-uppercase mb-1 font-weight-bold">Total Library</p>
+                        <h2 class="font-weight-bold mb-0">{{ stats.total_items }}</h2>
+                    </div>
+                    <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background: #eff6ff; color: #3b82f6;">
+                        <i class="fa fa-database"></i>
+                    </div>
+                </div>
+                <div class="mt-3 small text-muted">
+                    <span class="text-success"><i class="fa fa-video-camera mr-1"></i>{{ stats.video_count }} Videos</span>
+                </div>
+            </div>
         </div>
-      </div>
-      <div class="chart-wrapper">
-
-        <div class="row px-4 pb-4">
-          <div class="col-md-4 mb-3">
-            <h6 class="text-muted">Tracked reels</h6>
-            <div class="progress" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
-              <div class="progress-bar" style="width: {{ 100 if stats.reel_count else 4 }}%; background: var(--accent-primary);"></div>
-            </div>
-            <small class="text-muted">{{ stats.reel_count }} reel{% if stats.reel_count != 1 %}s{% endif %} in your workspace</small>
-          </div>
-          <div class="col-md-4 mb-3">
-            <h6 class="text-muted">Playable coverage</h6>
-            <div class="progress" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
-              <div class="progress-bar" style="width: {{ (stats.playable_reels * 100 / stats.reel_count)|round(0, 'floor') if stats.reel_count else 0 }}%; background: var(--accent-secondary);"></div>
-            </div>
-            <small class="text-muted">{{ stats.playable_reels }} playable reel{% if stats.playable_reels != 1 %}s{% endif %}</small>
-          </div>
-          <div class="col-md-4 mb-3">
-            <h6 class="text-muted">Highest views in view</h6>
-            <div class="progress" style="height: 6px; background: rgba(var(--text-main-rgb), 0.05);">
-              <div class="progress-bar" style="width: 100%; background: #22c55e;"></div>
-            </div>
-            <small class="text-muted">{{ stats.max_views|compact_number }} top visible views</small>
-          </div>
-        </div>
-      </div>
     </div>
-  </div>
+    
+    <div class="col-xl-3 col-lg-6 col-sm-6 mb-4">
+        <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p class="text-muted small text-uppercase mb-1 font-weight-bold">Avg Engagement</p>
+                        <h2 class="font-weight-bold mb-0">{{ stats.avg_views|compact_number }}</h2>
+                    </div>
+                    <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background: #fef2f2; color: #ef4444;">
+                        <i class="fa fa-line-chart"></i>
+                    </div>
+                </div>
+                <div class="mt-3 small text-muted">
+                    <span>Views per item</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-lg-6 col-sm-6 mb-4">
+        <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p class="text-muted small text-uppercase mb-1 font-weight-bold">Local Storage</p>
+                        <h2 class="font-weight-bold mb-0">{{ stats.playable_reels }}</h2>
+                    </div>
+                    <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background: #f0fdf4; color: #22c55e;">
+                        <i class="fa fa-hdd-o"></i>
+                    </div>
+                </div>
+                <div class="mt-3 small text-muted">
+                    <span>Offline-ready files</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-lg-6 col-sm-6 mb-4">
+        <div class="card border-0 shadow-sm overflow-hidden" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <p class="text-muted small text-uppercase mb-1 font-weight-bold">Photo/Carousel</p>
+                        <h2 class="font-weight-bold mb-0">{{ stats.image_count + stats.carousel_count }}</h2>
+                    </div>
+                    <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; background: #faf5ff; color: #a855f7;">
+                        <i class="fa fa-camera"></i>
+                    </div>
+                </div>
+                <div class="mt-3 small text-muted">
+                    <span>{{ stats.carousel_count }} Carousels</span>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="row">
-  <div class="col-lg-3 col-sm-6">
-    <div class="card" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(15, 23, 42, 1)) !important;">
-      <div class="card-body">
-        <h3 class="card-title text-white">Tracked reels</h3>
-        <div class="d-inline-block">
-          <h2 class="text-white">{{ stats.reel_count }}</h2>
-          <p class="text-muted mb-0">Saved locally</p>
+    <!-- TOP PERFORMING CONTENT -->
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm mb-4" style="border-radius: 16px;">
+            <div class="card-header bg-white border-0 py-4 px-4">
+                <h5 class="font-weight-bold m-0">Top Performing Content</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table align-items-center mb-0">
+                        <thead>
+                            <tr class="text-muted small">
+                                <th class="border-0 px-4">Item</th>
+                                <th class="border-0">Creator</th>
+                                <th class="border-0">Engagement</th>
+                                <th class="border-0 text-right px-4">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for reel in top_reels %}
+                            <tr>
+                                <td class="px-4">
+                                    <div class="d-flex align-items-center py-2">
+                                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" 
+                                             class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;" loading="lazy">
+                                        <div style="max-width: 250px;" class="text-truncate font-weight-bold">{{ reel.title or reel.shortcode }}</div>
+                                    </div>
+                                </td>
+                                <td><span class="badge badge-light rounded-pill">@{{ reel.creator }}</span></td>
+                                <td>
+                                    <div class="font-weight-bold"><i class="fa fa-play mr-1 small text-muted"></i> {{ reel.last_views|compact_number }}</div>
+                                </td>
+                                <td class="text-right px-4">
+                                    <a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg"><i class="fa fa-line-chart"></i></a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <span class="float-right display-5 opacity-5" style="color: var(--accent-primary);"><i class="fa fa-film"></i></span>
-      </div>
     </div>
-  </div>
-  <div class="col-lg-3 col-sm-6">
-    <div class="card" style="background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(15, 23, 42, 1)) !important;">
-      <div class="card-body">
-        <h3 class="card-title text-white">Tracked hashtags</h3>
-        <div class="d-inline-block">
-          <h2 class="text-white">{{ stats.tracked_hashtags }}</h2>
-          <p class="text-muted mb-0">Across current view</p>
-        </div>
-        <span class="float-right display-5 opacity-5" style="color: #22d3ee;"><i class="fa fa-hashtag"></i></span>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-sm-6">
-    <div class="card" style="background: linear-gradient(135deg, rgba(217, 70, 239, 0.1), rgba(15, 23, 42, 1)) !important;">
-      <div class="card-body">
-        <h3 class="card-title text-white">Average views</h3>
-        <div class="d-inline-block">
-          <h2 class="text-white">{{ stats.avg_views|compact_number }}</h2>
-          <p class="text-muted mb-0">Current batch average</p>
-        </div>
-        <span class="float-right display-5 opacity-5" style="color: #d946ef;"><i class="fa fa-line-chart"></i></span>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-sm-6">
-    <div class="card" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(15, 23, 42, 1)) !important;">
-      <div class="card-body">
-        <h3 class="card-title text-white">Playable reels</h3>
-        <div class="d-inline-block">
-          <h2 class="text-white">{{ stats.playable_reels }}</h2>
-          <p class="text-muted mb-0">Ready in-app</p>
-        </div>
-        <span class="float-right display-5 opacity-5" style="color: #22c55e;"><i class="fa fa-play-circle"></i></span>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div id="search-workspace" class="row">
-  <div class="col-lg-6 col-md-12">
-    <div class="card">
-      <div class="card-body">
-        <h4 class="card-title">Search workspace</h4>
-        <p class="text-muted">Use authenticated hashtag discovery and keep each search grouped cleanly.</p>
-        <form method="post" action="{{ url_for('main.discover') }}">
-          <div class="form-group">
-            <label for="hashtags">Hashtags</label>
-            <textarea id="hashtags" name="hashtags" class="form-control" rows="5" placeholder="#fitness, #business, #cooking">{% if active_hashtags %}{{ active_hashtags|join(', ') }}{% endif %}</textarea>
-            <div class="field-note">Tip: search one or a few hashtags at a time for better page-by-page review.</div>
-          </div>
-          <div class="inline-actions">
-            <button type="submit" class="btn-beautiful" {% if not instagram_connected %}disabled{% endif %}>Search hashtags</button>
-            <a class="btn-beautiful-ghost" href="{{ url_for('main.instagram_session') }}">Manage Instagram session</a>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-md-6">
-    <div class="card card-widget">
-      <div class="card-body">
-        <h5 class="text-muted">Active group</h5>
-        {% if active_group and active_group.state %}
-          <h2 class="mt-4">#{{ active_group.hashtag }}</h2>
-          <span>Current page {{ active_group.state.page }}</span>
-          <div class="mt-4">
-            <h4>{{ active_group.reels|length }}</h4>
-            <h6>Current page reels <span class="pull-right">{{ active_group.reels|length }}</span></h6>
-            <div class="progress mb-3" style="height: 7px">
-              <div class="progress-bar bg-primary" style="width: {{ 100 if active_group.reels else 5 }}%"></div>
+    <!-- SIDEBAR: TOP CREATORS & SEARCHES -->
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm mb-4" style="border-radius: 16px;">
+            <div class="card-header bg-white border-0 py-4 px-4">
+                <h5 class="font-weight-bold m-0">Top Creators</h5>
             </div>
-          </div>
-          <div class="mt-4">
-            <h4>{{ active_group.state.next_page or '-' }}</h4>
-            <h6 class="m-t-10 text-muted">Next page <span class="pull-right">{% if active_group.state.more_available %}Ready{% else %}Done{% endif %}</span></h6>
-            <div class="progress mb-3" style="height: 7px">
-              <div class="progress-bar bg-success" style="width: {{ 100 if active_group.state.more_available else 22 }}%"></div>
-            </div>
-          </div>
-          <div class="mt-4">
-            <h4>{{ stats.avg_views|compact_number }}</h4>
-            <h6 class="m-t-10 text-muted">Average views <span class="pull-right">Current view</span></h6>
-            <div class="progress mb-3" style="height: 7px">
-              <div class="progress-bar bg-warning" style="width: 76%"></div>
-            </div>
-          </div>
-        {% elif clear_view %}
-          <div class="empty-state">
-            Search cleared. Open a grouped view again to continue browsing.
-            {% if recent_searches %}
-            {% set recent_hashtag_query = recent_searches | map(attribute='hashtag') | list %}
-            <div class="mt-3">
-              <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=recent_searches[0].hashtag) }}">Open grouped view</a>
-            </div>
-            {% endif %}
-          </div>
-        {% elif recent_searches %}
-          {% set recent_hashtag_query = recent_searches | map(attribute='hashtag') | list %}
-          <div class="empty-state">
-            Older search groups are saved, but they stay hidden until you open one.
-            <div class="mt-3">
-              <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=recent_searches[0].hashtag) }}">Open grouped view</a>
-            </div>
-          </div>
-        {% else %}
-          <div class="empty-state">Run a hashtag search to create a grouped review workspace.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-md-6">
-    <div class="card">
-      <div class="card-body px-0">
-        <h4 class="card-title px-4 mb-3">Quick actions</h4>
-        <div class="todo-list">
-          <div class="tdl-holder">
-            <div class="tdl-content">
-              <ul id="workspace_actions">
-                <li><label><input type="checkbox" {% if instagram_connected %}checked{% endif %} disabled><i></i><span>Instagram session connected</span></label></li>
-                <li><label><input type="checkbox" {% if recent_searches %}checked{% endif %} disabled><i></i><span>Grouped searches available</span></label></li>
-                <li><label><input type="checkbox" {% if stats.playable_reels %}checked{% endif %} disabled><i></i><span>Playable reels ready</span></label></li>
-              </ul>
-            </div>
-            <div class="px-4 pb-3">
-              <div class="inline-actions">
-                <a class="btn-beautiful" href="{{ url_for('main.creator_search') }}">Creator Search</a>
-                {% if active_hashtags %}                <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', clear=1) }}">Clear search</a>
-                {% elif recent_searches %}
-                {% set recent_hashtag_query = recent_searches | map(attribute='hashtag') | list %}
-                <a class="btn-beautiful-ghost" href="{{ url_for('main.dashboard', hashtags=recent_hashtag_query|join(','), active_tag=recent_searches[0].hashtag) }}">Open grouped view</a>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="row">
-  <div class="col-lg-12">
-    <div class="card">
-      <div class="card-body">
-        <div class="active-member">
-          <div class="d-flex justify-content-between align-items-start flex-wrap mb-3">
-            <div>
-              <h4 class="card-title mb-1">Current result batch</h4>
-              {% if active_group and active_group.state %}
-              <p class="mb-0 text-muted">#{{ active_group.hashtag }} · Current page {{ active_group.state.page }}{% if active_group.state.more_available %} · Next page {{ active_group.state.next_page }} ready{% endif %}</p>
-              {% elif clear_view %}
-              <p class="mb-0 text-muted">Search cleared. Run a new hashtag search or reopen a saved group.</p>
-              {% elif recent_searches %}
-              <p class="mb-0 text-muted">Saved search groups are available, but no result table is shown until you open one.</p>
-              {% else %}
-              <p class="mb-0 text-muted">Search a hashtag to load a focused result batch.</p>
-              {% endif %}
-            </div>
-            <div class="inline-actions mt-3 mt-md-0">
-              <div class="view-switcher mr-3">
-                <button type="button" class="btn-beautiful-ghost active" id="view-list" title="List View"><i class="fa fa-list"></i></button>
-                <button type="button" class="btn-beautiful-ghost" id="view-grid" title="Grid View"><i class="fa fa-th"></i></button>
-              </div>
-              <form method="get" class="form-inline">
-                {% if active_hashtags %}
-                <input type="hidden" name="hashtags" value="{{ active_hashtags|join(',') }}">
-                {% endif %}
-                {% if selected_hashtag %}
-                <input type="hidden" name="active_tag" value="{{ selected_hashtag }}">
-                {% endif %}
-                <select name="sort_by" class="form-control mr-2">
-                    <option value="views_desc" {% if sort_by == 'views_desc' %}selected{% endif %}>Highest Views</option>
-                    <option value="views_asc" {% if sort_by == 'views_asc' %}selected{% endif %}>Lowest Views</option>
-                    <option value="newest" {% if sort_by == 'newest' %}selected{% endif %}>Newest Saved</option>
-                    <option value="oldest" {% if sort_by == 'oldest' %}selected{% endif %}>Oldest Saved</option>
-                </select>
-                <input type="number" class="form-control mr-2" name="min_views" value="{{ min_views or '' }}" placeholder="Min views" style="width: 100px;">
-                <button type="submit" class="btn-beautiful-ghost">Filter</button>
-              </form>
-              <form method="post" action="{{ url_for('main.refresh_all') }}">
-                <button type="submit" class="btn-beautiful-secondary ml-2">Refresh all</button>
-              </form>
-              {% if active_group and active_group.state %}
-              <form method="post" action="{{ url_for('main.discover_more', hashtag=active_group.hashtag) }}">
-                <input type="hidden" name="active_hashtags" value="{{ active_hashtags|join(',') if active_hashtags else active_group.hashtag }}">
-                <button type="submit" class="btn-beautiful ml-2" {% if not active_group.state.more_available %}disabled{% endif %}>
-                  {% if active_group.state.more_available %}Discover more on IG{% else %}No more results on IG{% endif %}
-                </button>
-              </form>
-              {% endif %}
-            </div>
-          </div>
-
-          <div id="results-container">
-            <!-- Table View -->
-            <div id="table-view" class="table-responsive">
-              <table class="table table-xs mb-0">
-                <thead>
-                  <tr>
-                    <th>Reel</th>
-                    <th>Creator</th>
-                    <th>Hashtag</th>
-                    <th>Page</th>
-                    <th>Views</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% if clear_view %}
-                    <tr><td colspan="7" class="text-muted text-center py-4">Search cleared. Pick a hashtag tab or run a new search to show results again.</td></tr>
-                  {% elif active_group and active_group.reels %}
-                    {% for reel in active_group.reels %}
-                    <tr>
-                      <td>
-                        <div class="d-flex align-items-center">
-                          {% if reel.thumbnail_url %}
-                          <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" alt="" class="rounded-lg mr-3" style="width: 54px; height: 54px; object-fit: cover; border: 1px solid var(--border-color);" loading="lazy" referrerpolicy="no-referrer">
-                          {% else %}
-                          <div class="rounded-lg mr-3 d-flex align-items-center justify-content-center" style="width: 54px; height: 54px; background: rgba(var(--text-main-rgb), 0.05); color: var(--accent-primary); font-weight: 700;">RS</div>
-                          {% endif %}
-                          <div>
-                            <div class="font-weight-bold" style="color: var(--text-main);">{{ reel.title or reel.shortcode or 'Tracked reel' }}</div>
-                            <div class="small text-muted">{{ reel.last_checked_at.strftime('%Y-%m-%d %H:%M') if reel.last_checked_at else 'not refreshed yet' }}</div>
-                          </div>
+            <div class="card-body p-4 pt-0">
+                {% for creator, count in top_creators %}
+                <div class="d-flex align-items-center justify-content-between mb-3 p-3 bg-light rounded-lg" style="background: #f8fafc !important;">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center mr-3" style="width: 36px; height: 36px; font-weight: bold;">
+                            {{ creator[:1]|upper if creator else '?' }}
                         </div>
-                      </td>
-                      <td style="color: var(--text-secondary);">@{{ reel.creator or 'unknown' }}</td>
-                      <td><span class="badge" style="background: rgba(var(--accent-primary), 0.1); color: var(--accent-primary);">#{{ reel.source_hashtag or 'manual' }}</span></td>
-                      <td style="color: var(--text-muted);">P{{ reel.discovery_page or 1 }}</td>
-                      <td style="font-weight: 600; color: var(--text-main);">{{ reel.last_views|compact_number }}</td>
-                      <td>
-                        <span class="badge {% if reel.enrichment_status == 'enriched' %}badge-success{% else %}badge-light{% endif %}" 
-                              style="background: {% if reel.enrichment_status == 'enriched' %}rgba(34, 197, 94, 0.1){% else %}rgba(var(--text-main-rgb), 0.05){% endif %}; 
-                                     color: {% if reel.enrichment_status == 'enriched' %}#22c55e{% else %}var(--text-muted){% endif %};">
-                          {{ reel.enrichment_status }}
-                        </span>
-                      </td>
-                      <td>
-                        <div class="inline-actions">
-                          <a class="btn-beautiful-ghost" style="padding: 0.4rem 0.8rem !important; font-size: 0.85rem;" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" title="Analyze">
-                            <i class="fa fa-line-chart"></i>
-                          </a>
-                          
-                          <form method="post" action="{{ url_for('main.refresh_one', reel_id=reel.id) }}" style="display:inline;">
-                            <button type="submit" class="btn-beautiful-ghost" style="padding: 0.4rem 0.8rem !important; font-size: 0.85rem;" title="Refresh (Fix missing thumbnail/video)">
-                              <i class="fa fa-refresh"></i>
-                            </button>
-                          </form>
-
-                          {% if reel.video_url %}
-                          <button
-                            type="button"
-                            class="btn-beautiful-secondary"
-                            style="padding: 0.4rem 0.8rem !important; font-size: 0.85rem;"
-                            data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
-                            data-play-title="{{ reel.title or reel.shortcode or 'Tracked reel' }}"
-                            data-play-poster="{{ url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
-                            data-shortcode="{{ reel.shortcode or '' }}"
-                            onclick="openPreviewFromButton(this)"
-                            title="Watch"
-                          >
-                            <i class="fa fa-play"></i>
-                          </button>
-                          {% endif %}
-                        </div>
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  {% elif recent_searches %}
-                    <tr><td colspan="7" class="text-muted text-center py-4">Older groups are saved, but the table stays clean until you open a group or run a new search.</td></tr>
-                  {% else %}
-                    <tr><td colspan="7" class="text-muted text-center py-4">No reels tracked yet. Run a hashtag search or add a reel manually.</td></tr>
-                  {% endif %}
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Grid View -->
-            <div id="grid-view" class="row d-none" style="padding: 1.5rem 0.5rem;">
-              {% if active_group and active_group.reels %}
-                {% for reel in active_group.reels %}
-                <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
-                  <div class="reel-box-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; height: 100%; transition: transform 0.2s ease;">
-                    <div class="reel-thumb-container" style="position: relative; aspect-ratio: 1/1; background: #000;">
-                      {% if reel.thumbnail_url %}
-                      <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" alt="" style="width: 100%; height: 100%; object-fit: cover; opacity: 0.85;" loading="lazy" referrerpolicy="no-referrer">
-                      {% else %}
-                      <div class="d-flex align-items-center justify-content-center" style="height: 100%; color: var(--accent-primary); font-size: 2rem; font-weight: 800;">RS</div>
-                      {% endif %}
-                      <div class="reel-thumb-overlay" style="position: absolute; bottom: 0; left: 0; right: 0; padding: 1rem; background: linear-gradient(0deg, rgba(0,0,0,0.8) 0%, transparent 100%);">
-                        <div class="d-flex justify-content-between align-items-end">
-                          <div>
-                            <div class="text-white font-weight-bold mb-1" style="font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 140px;">{{ reel.title or reel.shortcode or 'Tracked' }}</div>
-                            <div class="text-white-50 small">@{{ reel.creator or 'unknown' }}</div>
-                          </div>
-                          <div class="text-white font-weight-bold" style="font-size: 1rem;"><i class="fa fa-eye mr-1"></i>{{ reel.last_views|compact_number }}</div>
-                        </div>
-                      </div>
+                        <span class="font-weight-bold text-dark">@{{ creator }}</span>
                     </div>
-                    <div class="card-footer" style="padding: 1rem; background: var(--bg-card); border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-                      <a class="text-muted" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" style="font-size: 1.2rem;" title="Analyze"><i class="fa fa-line-chart"></i></a>
-                      {% if reel.video_url %}
-                      <button type="button" class="btn-beautiful" style="padding: 0.4rem 1rem !important; font-size: 0.8rem;" 
-                              data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
-                              data-play-title="{{ reel.title or reel.shortcode or 'Tracked reel' }}"
-                              data-play-poster="{{ url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
-                              data-shortcode="{{ reel.shortcode or '' }}"
-                              onclick="openPreviewFromButton(this)">
-                        <i class="fa fa-play mr-1"></i> Watch
-                      </button>
-                      {% endif %}
-                    </div>
-                  </div>
+                    <span class="badge badge-primary rounded-pill">{{ count }} posts</span>
                 </div>
                 {% endfor %}
-              {% else %}
-                <div class="col-12 text-center text-muted py-5">No results to display.</div>
-              {% endif %}
+                <a href="{{ url_for('main.creator_search') }}" class="btn btn-light btn-block rounded-pill font-weight-bold mt-2">View All Creators</a>
             </div>
-          </div>
-
-          {% if has_more_local %}
-          <div class="text-center mt-4">
-            <a href="{{ url_for('main.dashboard', hashtags=active_hashtags|join(','), active_tag=selected_hashtag, limit=limit+20, min_views=min_views) }}" class="btn-beautiful-ghost">
-              Load More (Showing {{ reels|length }} results)
-            </a>
-          </div>
-          {% endif %}
         </div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="row">
-  <div class="col-lg-6 col-md-12">
-    <div class="card">
-      <div class="card-body">
-        <h4 class="card-title">Top reels</h4>
-        <div class="row">
-          {% for reel in top_reels %}
-          <div class="col-sm-6 mb-4">
-            <div class="text-center">
-              {% if reel.thumbnail_url %}
-              <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded-circle mb-3" alt="" style="width: 92px; height: 92px; object-fit: cover;" loading="lazy" referrerpolicy="no-referrer">
-              {% else %}
-              <div class="rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" style="width: 92px; height: 92px; background: #eef1ff; color: #7571f9; font-weight: 700;">RS</div>
-              {% endif %}
-              <h5 class="mt-2 mb-1">{{ reel.title or reel.shortcode or 'Tracked reel' }}</h5>
-              <p class="m-0 text-muted">@{{ reel.creator or 'unknown_creator' }}</p>
-              <p class="m-0 text-muted">{{ reel.last_views|compact_number }} views · score {{ reel.viral_score or 0 }}</p>
-              <div class="inline-actions justify-content-center mt-3">
-                <a class="btn-beautiful-ghost" href="{{ url_for('main.reel_detail', reel_id=reel.id) }}">Analyze</a>
-                {% if reel.video_url %}
-                <button
-                  type="button"
-                  class="btn-beautiful-ghost"
-                  data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
-                  data-play-title="{{ reel.title or reel.shortcode or 'Tracked reel' }}"
-                  data-play-poster="{{ url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
-                  data-shortcode="{{ reel.shortcode or '' }}"
-                  onclick="openPreviewFromButton(this)"
-                >
-                  Play
-                </button>
-                {% endif %}
-              </div>
+        <div class="card border-0 shadow-sm" style="border-radius: 16px;">
+            <div class="card-header bg-white border-0 py-4 px-4">
+                <h5 class="font-weight-bold m-0">Recent Activity</h5>
             </div>
-          </div>
-          {% else %}
-          <div class="col-12"><div class="empty-state">No scored reels yet.</div></div>
-          {% endfor %}
+            <div class="card-body p-4 pt-0">
+                <div class="list-group list-group-flush">
+                    {% for search in recent_searches %}
+                    <a href="{{ url_for('main.hashtag_search', active_hashtag=search.hashtag) if search.hashtag.startswith('#') else url_for('main.creator_search', active_creator=search.hashtag.replace('creator:', '')) }}" 
+                       class="list-group-item list-group-item-action border-0 px-0 py-3 d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center">
+                            <i class="fa {{ 'fa-hashtag' if search.hashtag.startswith('#') else 'fa-user' }} mr-3 text-muted"></i>
+                            <span class="font-weight-bold">{{ search.hashtag.replace('creator:', '@') }}</span>
+                        </div>
+                        <small class="text-muted">{{ search.updated_at|time_ago }}</small>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
-      </div>
     </div>
-  </div>
-  <div class="col-lg-6 col-md-12">
-    <div class="card">
-      <div class="card-body">
-        <div class="active-member">
-          <h4 class="card-title">Workspace guide</h4>
-          <div class="table-responsive">
-            <table class="table table-xs mb-0">
-              <thead>
-                <tr>
-                  <th>Step</th>
-                  <th>Purpose</th>
-                  <th>Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Connect session</td>
-                  <td>Authenticated discovery</td>
-                  <td>Hashtag search works reliably</td>
-                </tr>
-                <tr>
-                  <td>Search hashtag</td>
-                  <td>Create grouped result batches</td>
-                  <td>Each hashtag stays isolated</td>
-                </tr>
-                <tr>
-                  <td>Load page</td>
-                  <td>Move through visible Instagram pages</td>
-                  <td>Page 2 only shows page 2 reels</td>
-                </tr>
-                <tr>
-                  <td>Play preview</td>
-                  <td>Review reels inside the app</td>
-                  <td>Fast screening without leaving dashboard</td>
-                </tr>
-                <tr>
-                  <td>Open analysis</td>
-                  <td>Inspect one reel in detail</td>
-                  <td>See notes and snapshot history</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
-
-<div id="preview-modal" class="modal" onclick="closePreview(event)" style="background: rgba(2, 6, 23, 0.85); backdrop-filter: blur(8px);">
-  <div class="modal-card" onclick="event.stopPropagation()" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 20px; padding: 1.5rem;">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <div>
-        <h4 id="preview-title" class="mb-1 text-white">Reel preview</h4>
-        <div class="small text-muted" id="preview-subtitle">Native video playback</div>
-      </div>
-      <button type="button" class="btn-beautiful-ghost" onclick="closePreview()">Close</button>
-    </div>
-    <div id="video-container" style="position: relative; width: 100%; aspect-ratio: 9/16; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; background: #000;">
-      <video id="preview-frame" class="preview-frame" controls playsinline preload="metadata" style="width: 100%; height: 100%;"></video>
-      <iframe id="preview-embed" style="display: none; width: 100%; height: 100%; border: none;"></iframe>
-    </div>
-  </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
-<script>
-  (function() {
-    const btnList = document.getElementById('view-list');
-    const btnGrid = document.getElementById('view-grid');
-    const tableView = document.getElementById('table-view');
-    const gridView = document.getElementById('grid-view');
-
-    function setView(view) {
-      if (view === 'grid') {
-        tableView.classList.add('d-none');
-        gridView.classList.remove('d-none');
-        btnGrid.classList.add('active');
-        btnList.classList.remove('active');
-        localStorage.setItem('reel_view', 'grid');
-      } else {
-        gridView.classList.add('d-none');
-        tableView.classList.remove('d-none');
-        btnList.classList.add('active');
-        btnGrid.classList.remove('active');
-        localStorage.setItem('reel_view', 'list');
-      }
-    }
-
-    // Load preference
-    const savedView = localStorage.getItem('reel_view');
-    if (savedView === 'grid') setView('grid');
-
-    btnList.addEventListener('click', () => setView('list'));
-    btnGrid.addEventListener('click', () => setView('grid'));
-  })();
-
-  const previewModal = document.getElementById('preview-modal');
-  const previewFrame = document.getElementById('preview-frame');
-  const previewEmbed = document.getElementById('preview-embed');
-  const previewTitle = document.getElementById('preview-title');
-  const previewSubtitle = document.getElementById('preview-subtitle');
-
-  function openPreviewFromButton(button) {
-    // We need the shortcode for the embed fallback
-    // Extract shortcode from the stream URL if not directly available
-    const playUrl = button.dataset.playUrl;
-    const shortcodeMatch = playUrl.match(/reels\/(\d+)\/stream/);
-    const reelId = shortcodeMatch ? shortcodeMatch[1] : null;
-
-    openPreview(
-      playUrl,
-      button.dataset.playTitle,
-      button.dataset.playPoster,
-      button.dataset.shortcode // We should ensure this is in the data attributes
-    );
-  }
-
-  function openPreview(url, title, poster, shortcode) {
-    // Reset state
-    previewFrame.pause();
-    previewFrame.removeAttribute('src');
-    previewFrame.load();
-    previewFrame.style.display = 'block';
-    previewEmbed.style.display = 'none';
-    previewEmbed.src = '';
-    previewSubtitle.textContent = 'Native video playback';
-    
-    // Set content
-    previewFrame.src = url;
-    previewFrame.poster = poster || '';
-    previewTitle.textContent = title || 'Reel preview';
-    
-    previewModal.classList.add('open');
-    
-    // Handle playback errors (like 403)
-    previewFrame.onerror = function() {
-      if (shortcode) {
-        console.log("Direct stream failed, switching to embed fallback.");
-        previewFrame.style.display = 'none';
-        previewEmbed.style.display = 'block';
-        previewEmbed.src = `https://www.instagram.com/reel/${shortcode}/embed/`;
-        previewSubtitle.textContent = 'Embed fallback (Direct stream blocked)';
-      }
-    };
-
-    const playPromise = previewFrame.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(error => {
-        // This often happens due to 403 or auto-play policy
-        if (previewFrame.networkState === 3 || previewFrame.error) {
-           // Network error / 403
-           previewFrame.onerror();
-        }
-      });
-    }
-  }
-
-  function closePreview(event) {
-    if (event && event.target !== previewModal && !event.target.classList.contains('btn-beautiful-ghost')) {
-      return;
-    }
-    previewFrame.pause();
-    previewFrame.src = '';
-    previewEmbed.src = '';
-    previewModal.classList.remove('open');
-  }
-</script>
 {% endblock %}

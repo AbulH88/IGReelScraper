@@ -223,67 +223,133 @@ def clear_instagram_session() -> None:
     db.session.commit()
 
 
-def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None) -> tuple[list[dict], dict]:
-    if has_instagram_session():
-        path = f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name={quote_plus(hashtag)}"
-        if max_id:
-            path += f"&max_id={quote_plus(max_id)}"
+def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_context=None) -> tuple[int, list[str], list[Reel], str | None]:
+    """
+    Fetch all media (images, reels, carousels) for a hashtag directly from Instagram API.
+    """
+    import threading
+    errors = []
+    imported = 0
+    new_reels = []
+    current_max_id = max_id
+    
+    tag = hashtag.strip().lstrip('#')
+    source_tag = f"#{tag}"
+    session_config = get_instagram_session()
+    if not session_config or not session_config.is_active:
+        errors.append("No active Instagram session.")
+        return 0, errors, [], None
+
+    headers = _instagram_headers(session_config, referer=f"{INSTAGRAM_BASE}/explore/tags/{tag}/")
+    cookies = _instagram_cookies(session_config)
+    url = f"{INSTAGRAM_BASE}/api/v1/tags/web_info/?tag_name={tag}"
+
+    from .models import HashtagSearchState
+    
+    # Scrolling loop (up to 20 batches for hashtags - they are denser)
+    for page_num in range(20):
+        db.session.expire_all()
+        state = HashtagSearchState.query.filter_by(hashtag=source_tag).first()
+        if state and state.status == 'cancelled':
+            return imported, errors, new_reels, None
+
+        params = {}
+        if current_max_id:
+            params["max_id"] = str(current_max_id)
+        
+        payload, exc = _make_ig_request(url, headers, cookies, params=params)
+        
+        if not payload:
+            if exc: errors.append(f"Batch failed: {exc}")
+            break
+
+        # Hashtag payload has a different structure: data -> recent -> sections
+        sections = payload.get("data", {}).get("recent", {}).get("sections", [])
+        if not sections:
+            # Try top posts if recent is empty
+            sections = payload.get("data", {}).get("top", {}).get("sections", [])
             
-        try:
-            payload = _instagram_api_get(
-                path,
-                referer=f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/",
-            )
-            results, pagination = _extract_reels_from_tag_payload(payload, hashtag)
-            if results:
-                return results, pagination
-        except:
-            pass
+        found_any = False
+        for section in sections:
+            layout_content = section.get("layout_content", {})
+            # Layout content can have 'medias' (list of wraps) or 'fill_items'
+            medias = layout_content.get("medias", [])
+            for wrap in medias:
+                media = wrap.get("media")
+                if not media: continue
+                found_any = True
+                
+                code = media.get("code")
+                if not code: continue
+                
+                m_type = _extract_media_type(media)
+                # If it's a video, check if it's a Reel
+                is_reel = (m_type == "video" and (media.get("is_dash_eligible") or media.get("product_type") == "clips"))
+                
+                if is_reel:
+                    full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
+                    m_type = "video"
+                else:
+                    full_url = f"{INSTAGRAM_BASE}/p/{code}/"
+                
+                views = media.get("play_count") or media.get("view_count")
+                likes = media.get("like_count")
+                comments = media.get("comment_count")
+                
+                existing = Reel.query.filter_by(url=full_url).first()
+                
+                # Extract carousel images
+                carousel_urls = []
+                if m_type == "carousel" and media.get("carousel_media"):
+                    for sub in media.get("carousel_media"):
+                        c_thumb = _thumbnail_from_media(sub)
+                        if c_thumb: carousel_urls.append(c_thumb)
 
-    url = f"{INSTAGRAM_BASE}/explore/tags/{hashtag}/"
-    response = _public_get(url)
-    html = response.text
-    if _looks_like_login_page(html, str(response.url)):
-        raise InstagramLoginRequiredError(
-            "Instagram returned a login page. Connect an Instagram session first."
-        )
-    soup = BeautifulSoup(html, "html.parser")
-    reel_urls = []
-    seen = set()
+                if existing:
+                    if source_tag not in existing.hashtag_list:
+                        merged = existing.hashtag_list + [source_tag]
+                        existing.hashtags = ", ".join(dict.fromkeys(merged))
+                    apply_metrics(existing, views, likes, comments)
+                    existing.media_type = m_type
+                    if carousel_urls:
+                        existing.carousel_json = json.dumps(carousel_urls)
+                    db.session.add(existing)
+                    new_reels.append(existing)
+                    continue
+                    
+                reel = Reel(
+                    source_hashtag=source_tag,
+                    url=full_url,
+                    shortcode=code,
+                    hashtags=source_tag,
+                    media_type=m_type,
+                    carousel_json=json.dumps(carousel_urls) if carousel_urls else None,
+                    title=media.get("caption", {}).get("text") if media.get("caption") else None,
+                    creator=media.get("user", {}).get("username"),
+                    thumbnail_url=_thumbnail_from_media(media),
+                    video_url=_video_url_from_media(media) if m_type == "video" else None,
+                    enrichment_status="ok",
+                )
+                apply_metrics(reel, views, likes, comments)
+                db.session.add(reel)
+                db.session.flush()
+                
+                if app_context:
+                    threading.Thread(target=download_media, args=(reel.id, app_context)).start()
 
-    for anchor in soup.select('a[href*="/reel/"]'):
-        href = anchor.get("href")
-        if not href:
-            continue
-        full_url = urljoin(INSTAGRAM_BASE, href.split("?")[0])
-        if full_url not in seen:
-            seen.add(full_url)
-            reel_urls.append({"url": full_url, "source_hashtag": hashtag})
-
-    if reel_urls:
-        return reel_urls, {"page": 1, "next_page": None, "more_available": False}
-
-    pattern = re.compile(r'"(\\/reel\\/[^"]+)"')
-    for match in pattern.findall(html):
-        full_url = urljoin(INSTAGRAM_BASE, match.replace("\\/", "/").split("?")[0])
-        if full_url not in seen:
-            seen.add(full_url)
-            reel_urls.append({"url": full_url, "source_hashtag": hashtag})
-
-    json_pattern = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
-    for block in json_pattern.findall(html):
-        try:
-            payload = json.loads(block)
-        except json.JSONDecodeError:
-            continue
-        candidates = payload if isinstance(payload, list) else [payload]
-        for item in candidates:
-            item_url = item.get("url") if isinstance(item, dict) else None
-            if item_url and "/reel/" in item_url and item_url not in seen:
-                seen.add(item_url)
-                reel_urls.append({"url": item_url, "source_hashtag": hashtag})
-
-    return reel_urls, {"page": 1, "next_page": None, "more_available": False}
+                new_reels.append(reel)
+                imported += 1
+        
+        db.session.commit()
+        
+        # Paging for hashtag
+        current_max_id = payload.get("data", {}).get("recent", {}).get("next_max_id")
+        more = payload.get("data", {}).get("recent", {}).get("more_available", False)
+        
+        if not current_max_id or not more or not found_any: break
+        time.sleep(random.uniform(1.0, 2.5))
+            
+    return imported, errors, new_reels, current_max_id
 
 
 def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:

@@ -29,6 +29,7 @@ def create_app(test_config=None):
     from .routes import bp
     app.register_blueprint(bp)
     app.jinja_env.filters["compact_number"] = compact_number
+    app.jinja_env.filters["time_ago"] = time_ago
     return app
 
 
@@ -41,6 +42,31 @@ def compact_number(value):
             trimmed = num / threshold
             return f"{trimmed:.1f}".rstrip("0").rstrip(".") + suffix
     return str(int(num))
+
+
+def time_ago(dt):
+    """Convert a datetime to a human-readable 'time ago' string."""
+    if not dt:
+        return ""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    
+    # Ensure dt is aware
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+        
+    diff = now - dt
+    
+    seconds = diff.total_seconds()
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h ago"
+    if seconds < 604800:
+        return f"{int(seconds // 86400)}d ago"
+    return dt.strftime('%b %d')
 
 
 def _ensure_schema_updates():

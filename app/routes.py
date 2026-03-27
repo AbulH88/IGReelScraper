@@ -34,121 +34,193 @@ def _to_int(name: str):
     return int(value) if value else None
 
 
-@bp.route('/')
-def dashboard():
-    min_views = request.args.get('min_views', type=int)
-    sort_by = request.args.get('sort_by', 'views_desc')
-    limit = request.args.get('limit', type=int) or 20
-    clear_view = request.args.get('clear') == '1'
-    active_hashtags = normalize_hashtags(request.args.get('hashtags', ''))
-    selected_hashtag = normalize_hashtags(request.args.get('active_tag', ''))
-    selected_hashtag = selected_hashtag[0] if selected_hashtag else None
-    
-    if active_hashtags and selected_hashtag not in active_hashtags:
-        selected_hashtag = active_hashtags[0]
+@bp.route('/hashtag-search', methods=['GET', 'POST'])
+def hashtag_search():
+    if request.method == 'POST':
+        hashtag = request.form.get('hashtag', '').strip()
+        if not hashtag:
+            flash('Hashtag is required', 'danger')
+            return redirect(url_for('main.hashtag_search'))
         
-    selected_search_state = (
-        HashtagSearchState.query.filter_by(hashtag=selected_hashtag).first()
-        if selected_hashtag
-        else None
-    )
+        if not hashtag.startswith('#'):
+            hashtag = f"#{hashtag}"
+            
+        # Check if already scrolling
+        state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+        if state and state.status == 'scrolling':
+            flash(f'Already searching {hashtag}. Please wait.', 'warning')
+            return redirect(url_for('main.hashtag_search', active_hashtag=hashtag))
+            
+        # Start background search
+        threading.Thread(
+            target=async_scroll_hashtag, 
+            args=(current_app._get_current_object(), hashtag)
+        ).start()
+        
+        flash(f'Started search for {hashtag} in the background.', 'success')
+        return redirect(url_for('main.hashtag_search', active_hashtag=hashtag))
+
+    active_hashtag = request.args.get('active_hashtag', '')
+    limit = request.args.get('limit', type=int) or 100
+    sort_by = request.args.get('sort_by', 'views_desc')
     
-    stats_query = Reel.query
-    if min_views is not None:
-        stats_query = stats_query.filter(Reel.last_views >= min_views)
-    library_reels = stats_query.all()
+    search_query = HashtagSearchState.query.filter(HashtagSearchState.hashtag.startswith('#')).order_by(HashtagSearchState.updated_at.desc())
+    recent_searches = search_query.all()
+    
+    hashtag_stats_list = []
+    if not active_hashtag:
+        for state in recent_searches:
+            tag_reels = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).all()
+            total = len(tag_reels)
+            processed = sum(1 for r in tag_reels if r.enrichment_status != 'pending')
+            progress = int((processed / max(total, 1)) * 100)
+            
+            hashtag_stats_list.append({
+                'hashtag': state.hashtag,
+                'total_items': total,
+                'progress': progress,
+                'status': state.status,
+                'last_updated': state.updated_at
+            })
 
     reels = []
-    if active_hashtags and not clear_view:
-        if sort_by == 'views_desc':
-            query = Reel.query.order_by(Reel.last_views.desc().nullslast())
-        elif sort_by == 'views_asc':
-            query = Reel.query.order_by(Reel.last_views.asc().nullslast())
-        elif sort_by == 'newest':
-            query = Reel.query.order_by(Reel.created_at.desc())
-        elif sort_by == 'oldest':
-            query = Reel.query.order_by(Reel.created_at.asc())
-        else:
-            query = Reel.query.order_by(Reel.last_views.desc().nullslast())
-
-        if min_views is not None:
-            query = query.filter(Reel.last_views >= min_views)
+    has_more_local = False
+    stats = {'count': 0, 'status': 'ready', 'progress': 0}
+    
+    if active_hashtag:
+        tag = active_hashtag if active_hashtag.startswith('#') else f"#{active_hashtag}"
+        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
+        if not state:
+            state = HashtagSearchState(hashtag=tag)
+            db.session.add(state)
+            db.session.commit()
+            
+        all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).all()
+        query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
         
-        if selected_hashtag and selected_hashtag in active_hashtags:
-            query = query.filter(Reel.hashtags.like(f"%{selected_hashtag}%"))
-        else:
-            # Match any of the active hashtags
-            query = query.filter(or_(*[Reel.hashtags.like(f"%{tag}%") for tag in active_hashtags]))
+        if sort_by == 'views_desc':
+            query = query.order_by(Reel.last_views.desc().nullslast())
+        elif sort_by == 'views_asc':
+            query = query.order_by(Reel.last_views.asc().nullslast())
+        elif sort_by == 'newest':
+            query = query.order_by(Reel.created_at.desc())
+        elif sort_by == 'oldest':
+            query = query.order_by(Reel.created_at.asc())
             
         reels = query.limit(limit).all()
         has_more_local = query.count() > len(reels)
-    else:
-        has_more_local = False
-
-    top_reels = sorted(reels, key=lambda reel: reel.viral_score or 0, reverse=True)[:5]
-    recent_search_query = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc())
-    if active_hashtags:
-        recent_search_query = recent_search_query.filter(HashtagSearchState.hashtag.in_(active_hashtags))
-    recent_searches = recent_search_query.limit(8).all()
-    if not recent_searches and not clear_view:
-        bootstrap_tags = sorted({reel.source_hashtag for reel in library_reels if reel.source_hashtag})
-        for hashtag in bootstrap_tags[:8]:
-            db.session.add(
-                HashtagSearchState(
-                    hashtag=hashtag,
-                    page=1,
-                    next_page=2,
-                    more_available=True,
-                )
-            )
-        if bootstrap_tags:
-            db.session.commit()
-            recent_search_query = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc())
-            if active_hashtags:
-                recent_search_query = recent_search_query.filter(HashtagSearchState.hashtag.in_(active_hashtags))
-            recent_searches = recent_search_query.limit(8).all()
-    search_state_by_tag = {state.hashtag: state for state in recent_searches}
-    grouped_reels = []
-    active_group = None
-    if active_hashtags and not clear_view:
-        for hashtag in active_hashtags:
-            tag_reels = [reel for reel in reels if reel.source_hashtag == hashtag]
-            state = search_state_by_tag.get(hashtag)
-            if tag_reels or state:
-                group = {'hashtag': hashtag, 'reels': tag_reels, 'state': state}
-                grouped_reels.append(group)
-                if hashtag == selected_hashtag:
-                    active_group = group
         
-        if not active_group and grouped_reels:
-            active_group = grouped_reels[0]
-            selected_hashtag = active_group['hashtag']
+        stats['count'] = len(all_group_reels)
+        stats['progress'] = int((sum(1 for r in all_group_reels if r.enrichment_status != 'pending') / max(stats['count'], 1)) * 100)
+        stats['status'] = state.status
 
-    ungrouped_reels = []
+    return render_template(
+        'hashtag_search.html',
+        reels=reels,
+        active_hashtag=active_hashtag,
+        hashtag_stats_list=hashtag_stats_list,
+        recent_searches=recent_searches,
+        stats=stats,
+        limit=limit,
+        sort_by=sort_by,
+        has_more_local=has_more_local
+    )
+
+
+@bp.route('/api/hashtag-status/<path:hashtag>')
+def get_hashtag_status(hashtag: str):
+    from .models import HashtagSearchState, Reel
+    if not hashtag.startswith('#'): hashtag = f"#{hashtag}"
+    state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+    if not state:
+        return jsonify({'error': 'Not found'}), 404
+    
+    all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == hashtag, Reel.hashtags.like(f"%{hashtag}%"))).all()
+    total = len(all_group_reels)
+    processed = sum(1 for r in all_group_reels if r.enrichment_status != 'pending')
+    progress = int((processed / max(total, 1)) * 100)
+    
+    return jsonify({
+        'hashtag': hashtag,
+        'status': state.status,
+        'progress': progress,
+        'total_items': total,
+        'processed_items': processed
+    })
+
+
+@bp.route('/api/cancel-hashtag-search/<path:hashtag>')
+def cancel_hashtag_search(hashtag: str):
+    from .models import HashtagSearchState
+    if not hashtag.startswith('#'): hashtag = f"#{hashtag}"
+    state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+    if state and state.status == 'scrolling':
+        state.status = 'cancelled'
+        db.session.commit()
+        return jsonify({'status': 'success'})
+    return jsonify({'status': 'error'}), 400
+
+
+def async_scroll_hashtag(app, hashtag):
+    with app.app_context():
+        from .models import db, Reel, HashtagSearchState
+        from .services import discover_reels_for_hashtag
+        
+        state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+        if not state:
+            state = HashtagSearchState(hashtag=hashtag)
+            db.session.add(state)
+        
+        state.status = 'scrolling'
+        state.last_error = None
+        db.session.commit()
+        
+        imported, errors, new_reels, next_max_id = discover_reels_for_hashtag(hashtag, app_context=app)
+        
+        state.next_max_id = next_max_id
+        state.more_available = bool(next_max_id)
+        state.status = 'done' if not errors else 'error'
+        if errors: state.last_error = "; ".join(errors)
+        db.session.commit()
+
+
+@bp.route('/')
+def dashboard():
+    all_reels = Reel.query.all()
+    
+    # Calculate global stats
+    total_count = len(all_reels)
+    video_count = sum(1 for r in all_reels if r.media_type == 'video')
+    image_count = sum(1 for r in all_reels if r.media_type == 'image')
+    carousel_count = sum(1 for r in all_reels if r.media_type == 'carousel')
+    
+    total_views = sum((r.last_views or 0) for r in all_reels)
+    avg_views = int(total_views / max(total_count, 1))
+    max_views = max([r.last_views or 0 for r in all_reels] or [0])
+    
+    # Top creators by count
+    from sqlalchemy import func
+    top_creators = db.session.query(Reel.creator, func.count(Reel.id).label('cnt')).group_by(Reel.creator).order_by(func.count(Reel.id).desc()).limit(5).all()
+    
+    # Recent searches
+    recent_searches = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc()).limit(10).all()
+    
     stats = {
-        'reel_count': len(library_reels),
-        'tracked_hashtags': len({tag for reel in library_reels for tag in reel.hashtag_list}),
-        'avg_views': int(sum((reel.last_views or 0) for reel in library_reels) / len(library_reels)) if library_reels else 0,
-        'max_views': max((reel.last_views or 0) for reel in library_reels) if library_reels else 0,
-        'playable_reels': sum(1 for reel in library_reels if reel.playable_url),
+        'total_items': total_count,
+        'video_count': video_count,
+        'image_count': image_count,
+        'carousel_count': carousel_count,
+        'avg_views': avg_views,
+        'max_views': max_views,
+        'playable_reels': sum(1 for r in all_reels if r.local_video_path or r.video_url)
     }
+
     return render_template(
         'dashboard.html',
-        reels=reels,
-        top_reels=top_reels,
         stats=stats,
-        min_views=min_views,
-        sort_by=sort_by,
-        limit=limit,
-        has_more_local=has_more_local,
-        instagram_connected=has_instagram_session(),
+        top_creators=top_creators,
         recent_searches=recent_searches,
-        active_hashtags=active_hashtags,
-        selected_hashtag=selected_hashtag,
-        grouped_reels=grouped_reels,
-        active_group=active_group,
-        ungrouped_reels=ungrouped_reels,
-        clear_view=clear_view,
+        top_reels=sorted(all_reels, key=lambda r: r.last_views or 0, reverse=True)[:6]
     )
 
 
