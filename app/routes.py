@@ -61,7 +61,7 @@ def hashtag_search():
         return redirect(url_for('main.hashtag_search', active_hashtag=hashtag))
 
     active_hashtag = request.args.get('active_hashtag', '')
-    limit = request.args.get('limit', type=int) or 100
+    limit = request.args.get('limit', type=int) or 200
     sort_by = request.args.get('sort_by', 'views_desc')
     
     search_query = HashtagSearchState.query.filter(HashtagSearchState.hashtag.startswith('#')).order_by(HashtagSearchState.updated_at.desc())
@@ -70,9 +70,8 @@ def hashtag_search():
     hashtag_stats_list = []
     if not active_hashtag:
         for state in recent_searches:
-            tag_reels = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).all()
-            total = len(tag_reels)
-            processed = sum(1 for r in tag_reels if r.enrichment_status != 'pending')
+            total = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%"), Reel.media_type == 'video').count()
+            processed = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%"), Reel.media_type == 'video', Reel.enrichment_status != 'pending').count()
             progress = int((processed / max(total, 1)) * 100)
             
             hashtag_stats_list.append({
@@ -95,8 +94,11 @@ def hashtag_search():
             db.session.add(state)
             db.session.commit()
             
-        all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).all()
-        query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
+        base_query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")), Reel.media_type == 'video')
+        total_count = base_query.count()
+        processed_count = base_query.filter(Reel.enrichment_status != 'pending').count()
+        
+        query = base_query
         
         if sort_by == 'views_desc':
             query = query.order_by(Reel.last_views.desc().nullslast())
@@ -108,10 +110,10 @@ def hashtag_search():
             query = query.order_by(Reel.created_at.asc())
             
         reels = query.limit(limit).all()
-        has_more_local = query.count() > len(reels)
+        has_more_local = total_count > len(reels)
         
-        stats['count'] = len(all_group_reels)
-        stats['progress'] = int((sum(1 for r in all_group_reels if r.enrichment_status != 'pending') / max(stats['count'], 1)) * 100)
+        stats['count'] = total_count
+        stats['progress'] = int((processed_count / max(total_count, 1)) * 100)
         stats['status'] = state.status
 
     return render_template(
@@ -135,9 +137,9 @@ def get_hashtag_status(hashtag: str):
     if not state:
         return jsonify({'error': 'Not found'}), 404
     
-    all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == hashtag, Reel.hashtags.like(f"%{hashtag}%"))).all()
-    total = len(all_group_reels)
-    processed = sum(1 for r in all_group_reels if r.enrichment_status != 'pending')
+    base_query = Reel.query.filter(or_(Reel.source_hashtag == hashtag, Reel.hashtags.like(f"%{hashtag}%")), Reel.media_type == 'video')
+    total = base_query.count()
+    processed = base_query.filter(Reel.enrichment_status != 'pending').count()
     progress = int((processed / max(total, 1)) * 100)
     
     return jsonify({
@@ -186,21 +188,24 @@ def async_scroll_hashtag(app, hashtag):
 
 @bp.route('/')
 def dashboard():
-    all_reels = Reel.query.all()
+    from sqlalchemy import func, or_
     
-    # Calculate global stats
-    total_count = len(all_reels)
-    video_count = sum(1 for r in all_reels if r.media_type == 'video')
-    image_count = sum(1 for r in all_reels if r.media_type == 'image')
-    carousel_count = sum(1 for r in all_reels if r.media_type == 'carousel')
+    total_count = Reel.query.count()
+    video_count = Reel.query.filter_by(media_type='video').count()
+    image_count = Reel.query.filter_by(media_type='image').count()
+    carousel_count = Reel.query.filter_by(media_type='carousel').count()
     
-    total_views = sum((r.last_views or 0) for r in all_reels)
+    total_views_res = db.session.query(func.sum(Reel.last_views)).scalar()
+    total_views = int(total_views_res) if total_views_res else 0
     avg_views = int(total_views / max(total_count, 1))
-    max_views = max([r.last_views or 0 for r in all_reels] or [0])
     
+    max_views_res = db.session.query(func.max(Reel.last_views)).scalar()
+    max_views = int(max_views_res) if max_views_res else 0
+    
+    playable_reels = Reel.query.filter(or_(Reel.video_url.isnot(None), Reel.shortcode.isnot(None))).count()
+
     # Top creators by count
-    from sqlalchemy import func
-    top_creators = db.session.query(Reel.creator, func.count(Reel.id).label('cnt')).group_by(Reel.creator).order_by(func.count(Reel.id).desc()).limit(5).all()
+    top_creators = db.session.query(Reel.creator, func.count(Reel.id).label('cnt')).filter(Reel.creator.isnot(None)).group_by(Reel.creator).order_by(func.count(Reel.id).desc()).limit(5).all()
     
     # Recent searches
     recent_searches = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc()).limit(10).all()
@@ -212,15 +217,17 @@ def dashboard():
         'carousel_count': carousel_count,
         'avg_views': avg_views,
         'max_views': max_views,
-        'playable_reels': sum(1 for r in all_reels if r.local_video_path or r.video_url)
+        'playable_reels': playable_reels
     }
+
+    top_reels = Reel.query.order_by(Reel.last_views.desc().nullslast()).limit(6).all()
 
     return render_template(
         'dashboard.html',
         stats=stats,
         top_creators=top_creators,
         recent_searches=recent_searches,
-        top_reels=sorted(all_reels, key=lambda r: r.last_views or 0, reverse=True)[:6]
+        top_reels=top_reels
     )
 
 
@@ -271,11 +278,12 @@ def proxy_image():
 
 @bp.route('/library')
 def library():
+    from sqlalchemy import func
     search_states = HashtagSearchState.query.order_by(HashtagSearchState.updated_at.desc()).all()
-    # Calculate counts per hashtag/creator
+    # Optimized: Count in one go or per hashtag using SQL
     counts = {}
     for state in search_states:
-        counts[state.hashtag] = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).count()
+        counts[state.hashtag] = db.session.query(func.count(Reel.id)).filter(Reel.hashtags.like(f"%{state.hashtag}%")).scalar()
     return render_template('library.html', search_states=search_states, counts=counts)
 
 
@@ -526,6 +534,11 @@ def creator_search():
             flash('Enter an Instagram profile URL or username.', 'warning')
             return redirect(url_for('main.creator_search'))
         
+        # Require an active Instagram session
+        if not has_instagram_session():
+            flash('Connect an Instagram session first so creator discovery can use authenticated requests.', 'warning')
+            return redirect(url_for('main.instagram_session'))
+        
         # Clean username
         clean_username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
         tag = f"creator:{clean_username}"
@@ -557,11 +570,15 @@ def creator_search():
     if not active_creator:
         for state in recent_searches:
             uname = state.hashtag.replace('creator:', '')
-            creator_reels = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%")).all()
-            total = len(creator_reels)
+            base_query = Reel.query.filter(Reel.hashtags.like(f"%{state.hashtag}%"))
+            total = base_query.count()
             
-            processed = sum(1 for r in creator_reels if r.enrichment_status != 'pending')
+            processed = base_query.filter(Reel.enrichment_status != 'pending').count()
             progress = int((processed / max(total, 1)) * 100)
+            
+            from sqlalchemy import func
+            total_views_res = db.session.query(func.sum(Reel.last_views)).filter(Reel.hashtags.like(f"%{state.hashtag}%")).scalar()
+            total_views = int(total_views_res) if total_views_res else 0
             
             # Fetch profile info if available
             profile = CreatorStats.query.filter_by(username=uname).first()
@@ -572,12 +589,13 @@ def creator_search():
                 'processed_reels': processed,
                 'progress': progress,
                 'status': state.status,
-                'total_views': sum((r.last_views or 0) for r in creator_reels),
+                'total_views': total_views,
                 'last_updated': state.updated_at,
                 'next_max_id': state.next_max_id,
                 'more_available': state.more_available,
                 'profile_pic': profile.profile_pic_url if profile else None,
-                'followers': profile.followers_count if profile else None
+                'followers': profile.followers_count if profile else None,
+                'last_error': state.last_error
             })
 
     reels = []
@@ -606,8 +624,11 @@ def creator_search():
             
         profile_data = CreatorStats.query.filter_by(username=active_creator).first()
         
-        all_group_reels = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).all()
-        query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
+        from sqlalchemy import func, or_
+        base_query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
+        total_count = base_query.count()
+        
+        query = base_query
         
         if sort_by == 'views_desc':
             query = query.order_by(Reel.last_views.desc().nullslast())
@@ -619,15 +640,25 @@ def creator_search():
             query = query.order_by(Reel.created_at.asc())
             
         reels = query.limit(limit).all()
-        has_more_local = query.count() > len(reels)
+        has_more_local = total_count > len(reels)
         
-        stats['reel_count'] = len(all_group_reels)
+        processed_count = base_query.filter(Reel.enrichment_status != 'pending').count()
+        
+        total_views_res = db.session.query(func.sum(Reel.last_views)).filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).scalar()
+        total_views = int(total_views_res) if total_views_res else 0
+        
+        max_views_res = db.session.query(func.max(Reel.last_views)).filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%"))).scalar()
+        max_views = int(max_views_res) if max_views_res else 0
+        
+        playable_count = base_query.filter(or_(Reel.video_url.isnot(None), Reel.shortcode.isnot(None))).count()
+        
+        stats['reel_count'] = total_count
         stats['processed_reels'] = len(reels) # Showing only processed
-        stats['progress'] = int((sum(1 for r in all_group_reels if r.enrichment_status != 'pending') / max(stats['reel_count'], 1)) * 100)
+        stats['progress'] = int((processed_count / max(total_count, 1)) * 100)
         
-        stats['avg_views'] = int(sum((r.last_views or 0) for r in all_group_reels) / max(len(all_group_reels), 1))
-        stats['max_views'] = max([r.last_views or 0 for r in all_group_reels] or [0])
-        stats['playable_reels'] = sum(1 for r in all_group_reels if r.playable_url)
+        stats['avg_views'] = int(total_views / max(total_count, 1))
+        stats['max_views'] = max_views
+        stats['playable_reels'] = playable_count
         stats['status'] = state.status
         stats['last_error'] = state.last_error
         stats['next_max_id'] = state.next_max_id
@@ -655,6 +686,17 @@ def download_reel(reel_id: int):
     reel = db.session.get(Reel, reel_id)
     if reel is None or not reel.video_url:
         abort(404)
+
+    if reel.local_video_path:
+        filename = reel.local_video_path.replace('media/', '')
+        import os
+        from flask import send_from_directory
+        return send_from_directory(
+            os.path.join(current_app.instance_path, 'media'),
+            filename,
+            as_attachment=True,
+            download_name=f"{reel.creator or 'instagram'}_{reel.shortcode or reel_id}.mp4"
+        )
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -746,18 +788,24 @@ def refresh_all():
 
 @bp.route('/insights')
 def insights():
-    reels = Reel.query.all()
+    # Only pull the hashtags column to save memory
+    all_hashtags = db.session.query(Reel.hashtags).filter(Reel.hashtags.isnot(None), Reel.hashtags != '').all()
     tag_counts = {}
-    for reel in reels:
-        for tag in reel.hashtag_list:
+    for (tags_str,) in all_hashtags:
+        for tag in dict.fromkeys([t.strip() for t in tags_str.split(',') if t.strip()]):
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            
     top_tags = sorted(tag_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+    
+    # Only pull top 5 reels for idea generation
+    top_viral_reels = Reel.query.order_by(Reel.viral_score.desc().nullslast()).limit(5).all()
     idea_prompts = []
-    for reel in sorted(reels, key=lambda item: item.viral_score or 0, reverse=True)[:5]:
+    for reel in top_viral_reels:
         parts = [part for part in [reel.niche, reel.hook, reel.cta, reel.format] if part]
         if parts:
             idea_prompts.append(' / '.join(parts))
-    return render_template('insights.html', reels=reels, top_tags=top_tags, idea_prompts=idea_prompts)
+            
+    return render_template('insights.html', reels=top_viral_reels, top_tags=top_tags, idea_prompts=idea_prompts)
 
 
 def async_enrich_reels(app, reel_ids, keyword):

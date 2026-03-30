@@ -16,7 +16,7 @@ from .models import InstagramSession, Reel, ReelSnapshot, db
 from .proxies import proxy_manager
 
 # Global thread pool for highly concurrent media downloading and enrichment
-worker_pool = ThreadPoolExecutor(max_workers=50)
+worker_pool = ThreadPoolExecutor(max_workers=5)
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 REQUEST_TIMEOUT = 30
@@ -126,6 +126,8 @@ def _instagram_headers(session_config: InstagramSession | None, *, referer: str 
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
         "Referer": referer or INSTAGRAM_BASE + "/",
     }
     if session_config and session_config.is_active:
@@ -167,8 +169,8 @@ def _instagram_api_get(path: str, *, referer: str | None = None, retries: int = 
             )
             
             if response.status_code == 429:
-                proxy_manager.mark_bad(proxy)
-                time.sleep(random.uniform(3, 7))
+                proxy_manager.mark_bad(proxy, is_rate_limit=True)
+                time.sleep(random.uniform(5, 10))
                 continue
                 
             response.raise_for_status()
@@ -280,6 +282,8 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
             break
             
         found_in_batch = 0
+        reels_to_download = []
+        reels_to_enrich = []
         for section in sections:
             layout_content = section.get("layout_content", {})
             # Also check 'fill_items' which sometimes contains reels in grid view
@@ -323,6 +327,12 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
                         existing.carousel_json = json.dumps(carousel_urls)
                     db.session.add(existing)
                     new_reels.append(existing)
+                    
+                    if not existing.local_video_path and existing.media_type == 'video':
+                        reels_to_download.append(existing.id)
+                    elif not existing.local_thumb_path:
+                        reels_to_download.append(existing.id)
+                        
                     continue
                     
                 reel = Reel(
@@ -342,17 +352,21 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
                 db.session.add(reel)
                 db.session.flush()
                 
-                if app_context:
-                    worker_pool.submit(download_media, reel.id, app_context)
-                    # If views are missing, queue for deep enrichment
-                    if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
-                        worker_pool.submit(_deep_enrich_task, reel.id, app_context)
+                reels_to_download.append(reel.id)
+                if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
+                    reels_to_enrich.append(reel.id)
 
                 new_reels.append(reel)
                 imported += 1
                 found_in_batch += 1
         
         db.session.commit()
+        
+        if app_context:
+            for rid in set(reels_to_download):
+                worker_pool.submit(download_media, rid, app_context)
+            for rid in set(reels_to_enrich):
+                worker_pool.submit(_deep_enrich_task, rid, app_context)
         
         # Paging for Sections API
         current_max_id = payload.get("next_max_id")
@@ -384,7 +398,7 @@ def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
             timeout=REQUEST_TIMEOUT
         )
         if response.status_code in (403, 429):
-            proxy_manager.mark_bad(proxy)
+            proxy_manager.mark_bad(proxy, is_rate_limit=(response.status_code == 429))
             
         response.raise_for_status()
         
@@ -520,53 +534,19 @@ def import_discovered_reels(hashtags: list[str], max_id_by_tag: dict[str, str] |
         current_max_id = (max_id_by_tag or {}).get(tag)
         for d in range(depth):
             try:
-                discovered, pagination = discover_reels_for_hashtag(tag, max_id=current_max_id)
+                # discover_reels_for_hashtag returns (imported, errors, new_reels, next_max_id)
+                page_imported_count, page_errors, new_reels, next_max_id = discover_reels_for_hashtag(tag, max_id=current_max_id)
             except Exception as exc:
                 errors.append(f"#{tag} (page {d+1}): {exc}")
                 break
-            
-            search_state[tag] = pagination
-            page_imported = 0
-            for item in discovered:
-                url = item["url"]
-                existing = Reel.query.filter_by(url=url).first()
-                if existing:
-                    existing.source_hashtag = existing.source_hashtag or tag
-                    if tag not in existing.hashtag_list:
-                        merged = existing.hashtag_list + [tag]
-                        existing.hashtags = ", ".join(dict.fromkeys(merged))
-                    
-                    # Always refresh these as they expire
-                    if item.get("thumbnail_url"):
-                        existing.thumbnail_url = item["thumbnail_url"]
-                    if item.get("video_url"):
-                        existing.video_url = item["video_url"]
-                    
-                    db.session.add(existing)
-                    apply_metrics(existing, item.get("views"), item.get("likes"), item.get("comments"))
-                    continue
-                
-                reel = Reel(
-                    source_hashtag=tag,
-                    url=url,
-                    shortcode=shortcode_from_url(url),
-                    hashtags=tag,
-                    thumbnail_url=item.get("thumbnail_url"),
-                    video_url=item.get("video_url"),
-                    creator=item.get("creator"),
-                    title=item.get("title"),
-                    caption=item.get("caption"),
-                    enrichment_status="pending",
-                )
-                db.session.add(reel)
-                apply_metrics(reel, item.get("views"), item.get("likes"), item.get("comments"))
-                page_imported += 1
-            
-            total_imported += page_imported
-            db.session.commit()
-            
-            current_max_id = pagination.get("next_max_id")
-            if not pagination.get("more_available") or not current_max_id:
+
+            errors.extend(page_errors)
+            total_imported += page_imported_count
+            more_available = bool(next_max_id)
+            search_state[tag] = {"next_max_id": next_max_id, "more_available": more_available}
+
+            current_max_id = next_max_id
+            if not more_available or not current_max_id:
                 break
                 
     return total_imported, errors, search_state
@@ -671,11 +651,12 @@ def refresh_all_reels() -> tuple[int, list[str]]:
     return refreshed, errors
 
 
-def get_user_info(username: str) -> dict | None:
-    """Get full profile info for a user and update CreatorStats."""
+def get_user_info(username: str) -> tuple[dict | None, str | None]:
+    """Get full profile info for a user and update CreatorStats. Returns (data, error_msg)."""
     from .models import CreatorStats
     
     data = None
+    error_msg = None
     # Method 1: web_profile_info (Most detailed)
     try:
         url = f"{INSTAGRAM_BASE}/api/v1/users/web_profile_info/?username={username}"
@@ -694,21 +675,44 @@ def get_user_info(username: str) -> dict | None:
                 "posts_count": user_data.get("edge_owner_to_timeline_media", {}).get("count"),
                 "is_verified": user_data.get("is_verified"),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        error_msg = f"API Method failed: {e}"
         
     if not data:
         # Fallback to HTML scraping via proxy
         try:
             response = _public_get(f"{INSTAGRAM_BASE}/{username}/")
             html = response.text
-            # Simple regex extraction for ID if API fails
-            match = re.search(r'"(?:profile|user)_id":"(\d+)"', html)
-            uid = match.group(1) if match else None
+            
+            # More robust regex extraction list for modern IG HTML
+            patterns = [
+                r'"(?:profile|user)_id":"(\d+)"',
+                r'"id":"(\d{5,})"',
+                r'"delegate_page_id":"(\d+)"',
+                r'"pk":"(\d+)"',
+                r'"owner":\s*\{\s*"id":\s*"(\d+)"',
+                r'instagram://user\?username=[^&]+&id=(\d+)',
+                r'fb://profile/(\d+)',
+            ]
+            
+            uid = None
+            for p in patterns:
+                match = re.search(p, html)
+                if match:
+                    uid = match.group(1)
+                    break 
+                    
             if uid:
                 data = {"id": uid, "username": username}
-        except Exception:
-            pass
+            else:
+                if "login_required" in html or "Login • Instagram" in html:
+                    error_msg = f"Instagram requested login to view @{username}. Check your session status."
+                elif "Page Not Found" in html:
+                    error_msg = f"Instagram user @{username} not found."
+                else:
+                    error_msg = "Could not extract numeric ID from Instagram profile HTML."
+        except Exception as e:
+            error_msg = f"HTML Fallback failed: {e}"
 
     if data and data.get("username"):
         # Update or create CreatorStats
@@ -724,7 +728,7 @@ def get_user_info(username: str) -> dict | None:
         db.session.add(stats)
         db.session.commit()
         
-    return data
+    return data, error_msg
 
 
 import os
@@ -857,6 +861,9 @@ def _make_ig_request(url, headers, cookies, params=None, data=None, method="GET"
     """Internal helper to make IG requests with retries and proxy rotation."""
     payload = None
     last_exc = None
+    # Safe helpers for logging
+    def _proxy_label(p): return p.split('@')[-1] if p and '@' in p else (p or 'direct')
+    def _url_label(u): parts = u.split('/v1/'); return parts[1] if len(parts) > 1 else u.split('/')[-2]
     for retry in range(3):
         proxy = None
         try:
@@ -867,13 +874,13 @@ def _make_ig_request(url, headers, cookies, params=None, data=None, method="GET"
                 resp = requests.post(url, headers=headers, cookies=cookies, data=data, proxy=proxy, impersonate="chrome131", timeout=15)
             
             if resp.status_code == 200:
-                print(f"SUCCESS: {method} {url.split('/v1/')[1]} via {proxy.split('@')[1] if proxy else 'direct'}")
+                print(f"SUCCESS: {method} {_url_label(url)} via {_proxy_label(proxy)}")
                 return resp.json(), None
 
             if resp.status_code == 429:
-                proxy_manager.mark_bad(proxy)
-                print(f"RETRY: Rate limited (429) on proxy {proxy.split('@')[1] if proxy else 'direct'}. Retry {retry+1}/3")
-                time.sleep(1)
+                proxy_manager.mark_bad(proxy, is_rate_limit=True)
+                print(f"RETRY: Rate limited (429) on proxy {_proxy_label(proxy)}. Retry {retry+1}/3")
+                time.sleep(2)
                 continue
             
             resp.raise_for_status()
@@ -900,9 +907,10 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
     username = username.strip().strip('/').split('/')[-1].lstrip('@').split('?')[0]
     
     # 2. Get User Info & ID
-    user_info = get_user_info(username)
+    user_info, discovery_error = get_user_info(username)
     if not user_info or not user_info.get("id"):
-        errors.append(f"Could not find ID for @{username}. Profile may be private.")
+        err = discovery_error or f"Could not find ID for @{username}. Profile may be private or blocked."
+        errors.append(err)
         return 0, errors, [], None
         
     user_id = user_info["id"]
@@ -923,6 +931,9 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
     ]
 
     from .models import HashtagSearchState
+    
+    # Track feed endpoint pagination separately — this is what callers use to resume a feed scroll.
+    feed_next_max_id = None
     
     for url in endpoints:
         current_max_id = max_id if url == endpoints[0] else None # Reset max_id for second endpoint
@@ -953,6 +964,9 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
 
             items = payload.get("items", [])
             if not items: break
+            
+            reels_to_download = []
+            reels_to_enrich = []
                 
             for item in items:
                 media = item.get("media", item) 
@@ -993,6 +1007,12 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                         existing.carousel_json = json.dumps(carousel_urls)
                     db.session.add(existing)
                     new_reels.append(existing)
+                    
+                    if not existing.local_video_path and existing.media_type == 'video':
+                        reels_to_download.append(existing.id)
+                    elif not existing.local_thumb_path:
+                        reels_to_download.append(existing.id)
+                        
                     continue
                     
                 reel = Reel(
@@ -1012,16 +1032,20 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                 db.session.add(reel)
                 db.session.flush() # Get ID for thread
                 
-                if app_context:
-                    worker_pool.submit(download_media, reel.id, app_context)
-                    # If views are missing, queue for deep enrichment
-                    if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
-                        worker_pool.submit(_deep_enrich_task, reel.id, app_context)
+                reels_to_download.append(reel.id)
+                if (reel.last_views is None or reel.last_views == 0) and reel.media_type == 'video':
+                    reels_to_enrich.append(reel.id)
 
                 new_reels.append(reel)
                 imported += 1
             
             db.session.commit()
+            
+            if app_context:
+                for rid in set(reels_to_download):
+                    worker_pool.submit(download_media, rid, app_context)
+                for rid in set(reels_to_enrich):
+                    worker_pool.submit(_deep_enrich_task, rid, app_context)
             
             # Paging
             if is_clips:
@@ -1031,11 +1055,14 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
             else:
                 current_max_id = payload.get("next_max_id")
                 more = payload.get("more_available", True)
+                # Store the feed endpoint's cursor for the return value
+                feed_next_max_id = current_max_id
                 
             if not current_max_id or not more: break
             time.sleep(random.uniform(0.5, 1.5)) # Accelerated pagination
             
-    return imported, errors, new_reels, current_max_id
+    # Return the feed endpoint's max_id so callers can resume the feed scroll.
+    return imported, errors, new_reels, feed_next_max_id
 
 
 

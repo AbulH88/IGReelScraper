@@ -4,24 +4,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if [[ ! -d ".venv" ]]; then
-  echo "Missing virtual environment at $SCRIPT_DIR/.venv" >&2
+if [[ ! -d "venvlinux" ]]; then
+  echo "Missing virtual environment at $SCRIPT_DIR/venvlinux" >&2
   echo "Create it first, then install requirements." >&2
   exit 1
 fi
 
 # Use the python in the venv explicitly
-PYTHON="$SCRIPT_DIR/.venv/bin/python"
-FLASK="$SCRIPT_DIR/.venv/bin/flask"
+PYTHON="$SCRIPT_DIR/venvlinux/bin/python"
+FLASK="$SCRIPT_DIR/venvlinux/bin/flask"
 
 if [[ ! -f "$PYTHON" ]]; then
-  echo "Python not found in .venv. Did you create it?" >&2
+  echo "Python not found in venvlinux. Did you create it?" >&2
   exit 1
 fi
 
 if ! "$PYTHON" -c "import flask" &>/dev/null; then
   echo "Flask is not installed in the virtual environment." >&2
-  echo "Run: source .venv/bin/activate && pip install -r requirements.txt" >&2
+  echo "Run: source venvlinux/bin/activate && pip install -r requirements.txt" >&2
   exit 1
 fi
 
