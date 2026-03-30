@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 import requests
 import time
 import threading
-from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, stream_with_context, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, stream_with_context, url_for
 from sqlalchemy import or_
 
 from .models import HashtagSearchState, Reel, TaskNotification, db
@@ -231,12 +232,16 @@ def dashboard():
     )
 
 
-from flask import send_from_directory
-
 @bp.route('/media/<path:filename>')
 def serve_media(filename):
     """Serve downloaded images and videos."""
-    return send_from_directory(os.path.join(current_app.instance_path, 'media'), filename)
+    media_path = os.path.join(current_app.instance_path, 'media')
+    full_path = os.path.join(media_path, filename)
+    print(f"DEBUG: Serving media from {full_path}")
+    if not os.path.exists(full_path):
+        print(f"DEBUG: File not found: {full_path}")
+        abort(404)
+    return send_from_directory(media_path, filename)
 
 @bp.route('/proxy-image')
 def proxy_image():
@@ -450,7 +455,8 @@ def stream_reel_video(reel_id: int):
     try:
         upstream = get_upstream(reel.video_url)
         upstream.raise_for_status()
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"DEBUG: Initial stream attempt failed for {reel.shortcode}: {e}")
         # If the direct URL fails (403/410), refresh the reel to get a fresh signed URL
         from .services import refresh_reel
         old_url = reel.video_url
@@ -458,11 +464,15 @@ def stream_reel_video(reel_id: int):
         
         # If the URL didn't change, we might be hitting a block or login wall on the public page
         if reel.video_url == old_url:
-            # Fallback: if we can't get a fresh direct URL, we can't stream it this way
-            abort(403)
+            print(f"DEBUG: Refresh failed to provide new URL for {reel.shortcode}")
+            abort(403, description="Instagram blocked the request or the session is invalid. Try refreshing the session.")
             
-        upstream = get_upstream(reel.video_url)
-        upstream.raise_for_status()
+        try:
+            upstream = get_upstream(reel.video_url)
+            upstream.raise_for_status()
+        except requests.RequestException as e2:
+            print(f"DEBUG: Second stream attempt failed for {reel.shortcode}: {e2}")
+            abort(403, description=f"Could not stream video after refresh: {e2}")
 
     passthrough_headers = {
         'Content-Type': upstream.headers.get('Content-Type', 'video/mp4'),
@@ -689,8 +699,6 @@ def download_reel(reel_id: int):
 
     if reel.local_video_path:
         filename = reel.local_video_path.replace('media/', '')
-        import os
-        from flask import send_from_directory
         return send_from_directory(
             os.path.join(current_app.instance_path, 'media'),
             filename,

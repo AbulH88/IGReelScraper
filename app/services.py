@@ -1,4 +1,6 @@
 import json
+import os
+from pathlib import Path
 import math
 import re
 import time
@@ -382,68 +384,96 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
 
 
 def enrich_reel(reel: Reel, manual_metrics: dict | None = None) -> Reel:
+    """Scrape the public reel page to find the direct video URL and metrics."""
     payload = manual_metrics or {}
-    try:
-        session_config = get_instagram_session()
-        headers = _instagram_headers(session_config, referer=reel.url)
-        cookies = _instagram_cookies(session_config)
+    session_config = get_instagram_session()
+    last_error = None
+    
+    # Try 3 times with different proxies
+    for attempt in range(3):
         proxy = proxy_manager.get_random_proxy()
-        
-        response = requests.get(
-            reel.url, 
-            headers=headers, 
-            cookies=cookies, 
-            proxy=proxy,
-            impersonate="chrome131",
-            timeout=REQUEST_TIMEOUT
-        )
-        if response.status_code in (403, 429):
-            proxy_manager.mark_bad(proxy, is_rate_limit=(response.status_code == 429))
+        try:
+            headers = _instagram_headers(session_config, referer=reel.url)
+            cookies = _instagram_cookies(session_config)
             
-        response.raise_for_status()
-        
-        html = response.text
-        soup = BeautifulSoup(html, "html.parser")
+            response = requests.get(
+                reel.url, 
+                headers=headers, 
+                cookies=cookies, 
+                proxy=proxy,
+                impersonate="chrome131",
+                timeout=REQUEST_TIMEOUT
+            )
+            
+            if response.status_code == 429:
+                proxy_manager.mark_bad(proxy, is_rate_limit=True)
+                time.sleep(random.uniform(2, 5))
+                continue
+            elif response.status_code == 403:
+                proxy_manager.mark_bad(proxy)
+                continue
+            
+            response.raise_for_status()
+            html = response.text
+            soup = BeautifulSoup(html, "html.parser")
 
-        title = None
-        og_title = soup.find("meta", attrs={"property": "og:title"})
-        if og_title:
-            title = og_title.get("content")
-        description = soup.find("meta", attrs={"property": "og:description"})
-        description_text = description.get("content") if description else None
-        og_video = soup.find("meta", attrs={"property": "og:video:secure_url"}) or soup.find(
-            "meta", attrs={"property": "og:video"}
-        )
-        og_image = (
-            soup.find("meta", attrs={"property": "og:image:secure_url"}) or 
-            soup.find("meta", attrs={"property": "og:image"}) or
-            soup.find("meta", attrs={"name": "twitter:image"})
-        )
+            title = None
+            og_title = soup.find("meta", attrs={"property": "og:title"})
+            if og_title:
+                title = og_title.get("content")
+                
+            description = soup.find("meta", attrs={"property": "og:description"})
+            description_text = description.get("content") if description else None
+            
+            og_video = soup.find("meta", attrs={"property": "og:video:secure_url"}) or \
+                       soup.find("meta", attrs={"property": "og:video"})
+            
+            og_image = (
+                soup.find("meta", attrs={"property": "og:image:secure_url"}) or 
+                soup.find("meta", attrs={"property": "og:image"}) or
+                soup.find("meta", attrs={"name": "twitter:image"})
+            )
 
-        reel.shortcode = reel.shortcode or shortcode_from_url(reel.url)
-        reel.title = reel.title or title
-        reel.caption = reel.caption or description_text
-        reel.creator = reel.creator or _extract_creator(title)
-        
-        # Always update video and thumbnail if we found fresh ones, as they expire
-        if og_video and og_video.get("content"):
-            reel.video_url = og_video.get("content")
-        if og_image and og_image.get("content"):
-            reel.thumbnail_url = og_image.get("content")
+            reel.shortcode = reel.shortcode or shortcode_from_url(reel.url)
+            reel.title = reel.title or title
+            reel.caption = reel.caption or description_text
+            reel.creator = reel.creator or _extract_creator(title)
+            
+            # Found fresh ones
+            if og_video and og_video.get("content"):
+                reel.video_url = og_video.get("content")
+            if og_image and og_image.get("content"):
+                reel.thumbnail_url = og_image.get("content")
 
-        metrics = extract_metrics_from_html(html, description_text)
-        views = payload.get("views") if payload.get("views") is not None else metrics.get("views")
-        likes = payload.get("likes") if payload.get("likes") is not None else metrics.get("likes")
-        comments = payload.get("comments") if payload.get("comments") is not None else metrics.get("comments")
+            # Fallback for video URL if meta tag missing (sometimes happens on login wall)
+            if not og_video:
+                video_matches = re.findall(r'"video_url":"([^"]+)"', html)
+                if video_matches:
+                    reel.video_url = video_matches[0].replace("\\u0026", "&")
 
-        apply_metrics(reel, views, likes, comments)
-        reel.enrichment_status = "ok"
-        reel.last_error = None
-    except Exception as exc:
+            metrics = extract_metrics_from_html(html, description_text)
+            views = payload.get("views") if payload.get("views") is not None else metrics.get("views")
+            likes = payload.get("likes") if payload.get("likes") is not None else metrics.get("likes")
+            comments = payload.get("comments") if payload.get("comments") is not None else metrics.get("comments")
+
+            apply_metrics(reel, views, likes, comments)
+            reel.enrichment_status = "ok"
+            reel.last_error = None
+            
+            # If we reached here without exception, consider it success
+            last_error = None
+            break
+        except Exception as exc:
+            proxy_manager.mark_bad(proxy)
+            last_error = str(exc)
+            time.sleep(1)
+
+    if last_error:
         reel.enrichment_status = "error"
-        reel.last_error = str(exc)
+        reel.last_error = last_error
         if payload:
             apply_metrics(reel, payload.get("views"), payload.get("likes"), payload.get("comments"))
+    
     reel.last_checked_at = datetime.now(timezone.utc)
     db.session.add(reel)
     db.session.commit()
@@ -730,9 +760,6 @@ def get_user_info(username: str) -> tuple[dict | None, str | None]:
         
     return data, error_msg
 
-
-import os
-from pathlib import Path
 
 # Media storage configuration
 MEDIA_DIR = Path("instance") / "media"

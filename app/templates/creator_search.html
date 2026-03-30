@@ -82,12 +82,15 @@
 
             <div class="progress-section mb-4">
                 <div class="d-flex justify-content-between text-muted small mb-1">
-                  <span>{% if creator.status == 'scrolling' %}Scrolling Batch...{% else %}Sync Status{% endif %}</span>
+                  <span>{% if creator.status == 'scrolling' %}Scrolling Batch...{% elif creator.status == 'error' %}Sync Error{% else %}Sync Status{% endif %}</span>
                   <span>{{ creator.progress }}%</span>
                 </div>
                 <div class="progress" style="height: 6px; border-radius: 10px; background: #f0f4f8;">
-                  <div class="progress-bar bg-primary" style="width: {{ creator.progress }}%; border-radius: 10px; background-color: #3b82f6 !important;"></div>
+                  <div class="progress-bar {% if creator.status == 'error' %}bg-danger{% else %}bg-primary{% endif %}" style="width: {{ creator.progress }}%; border-radius: 10px; {% if creator.status != 'error' %}background-color: #3b82f6 !important;{% endif %}"></div>
                 </div>
+                {% if creator.status == 'error' and creator.last_error %}
+                <div class="small text-danger mt-2 line-clamp-2" style="font-size: 0.75rem;"><i class="fa fa-exclamation-triangle"></i> {{ creator.last_error }}</div>
+                {% endif %}
             </div>
             
             <div class="d-flex justify-content-between align-items-center mt-auto pt-2">
@@ -201,7 +204,7 @@
 
 <div class="tab-content" id="profileTabContent">
     <!-- PROGRESS SECTION (VISIBLE DURING SCROLLING/PROCESSING) -->
-    <div id="scrolling-progress-container" class="mb-4 {% if stats.status != 'scrolling' and stats.progress >= 100 %}d-none{% endif %}">
+    <div id="scrolling-progress-container" class="mb-4 {% if stats.status != 'scrolling' and stats.status != 'error' and stats.progress >= 100 %}d-none{% endif %}">
         <div class="card border-0 shadow-sm" style="border-radius: 16px; background: #f8fafc;">
             <div class="card-body p-4">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -211,6 +214,8 @@
                             <i class="fa fa-spinner fa-spin mr-2 text-primary"></i> Scrolling profile...
                             {% elif stats.status == 'cancelled' %}
                             <i class="fa fa-ban mr-2 text-danger"></i> Search cancelled
+                            {% elif stats.status == 'error' %}
+                            <i class="fa fa-exclamation-triangle mr-2 text-danger"></i> Sync Error
                             {% else %}
                             <i class="fa fa-cog fa-spin mr-2 text-primary"></i> Processing data...
                             {% endif %}
@@ -223,13 +228,18 @@
                         <button id="stop-search-btn" class="btn btn-xs btn-outline-danger py-0 px-2 mr-3 rounded-pill {% if stats.status != 'scrolling' %}d-none{% endif %}" style="font-size: 0.7rem; height: 20px;">
                             <i class="fa fa-stop mr-1"></i> Stop Search
                         </button>
-                        <span class="font-weight-bold text-primary" id="progress-percent-text">{{ stats.progress }}%</span>
+                        <span class="font-weight-bold {% if stats.status == 'error' %}text-danger{% else %}text-primary{% endif %}" id="progress-percent-text">{{ stats.progress }}%</span>
                     </div>
                 </div>
                 <div class="progress" style="height: 10px; border-radius: 10px; background: #e2e8f0;">
-                    <div id="progress-bar-inner" class="progress-bar progress-bar-striped progress-bar-animated" 
-                         role="progressbar" style="width: {{ stats.progress }}%; border-radius: 10px; background-color: #3b82f6 !important;"></div>
+                    <div id="progress-bar-inner" class="progress-bar {% if stats.status == 'error' %}bg-danger{% else %}progress-bar-striped progress-bar-animated{% endif %}" 
+                         role="progressbar" style="width: {{ stats.progress }}%; border-radius: 10px; {% if stats.status != 'error' %}background-color: #3b82f6 !important;{% endif %}"></div>
                 </div>
+                
+                <div id="error-notice" class="mt-3 p-2 bg-danger text-white rounded small {% if stats.status != 'error' or not stats.last_error %}d-none{% endif %}">
+                    <i class="fa fa-info-circle mr-1"></i> <span id="error-notice-text">{{ stats.last_error }}</span>
+                </div>
+                
                 <div id="refresh-notice" class="mt-3 small text-center text-muted d-none">
                     <i class="fa fa-info-circle mr-1"></i> New items found! <a href="javascript:location.reload()" class="font-weight-bold text-primary">Click to refresh view</a>
                 </div>
@@ -663,6 +673,21 @@
             if (data.status === 'scrolling') {
               progressStatus.innerHTML = '<i class="fa fa-spinner fa-spin mr-2 text-primary"></i> Scrolling profile...';
               if (stopBtn) stopBtn.classList.remove('d-none');
+              if (progressBar) progressBar.className = "progress-bar progress-bar-striped progress-bar-animated";
+              if (progressPercent) { progressPercent.classList.remove('text-danger'); progressPercent.classList.add('text-primary'); }
+              document.getElementById('error-notice')?.classList.add('d-none');
+            } else if (data.status === 'error') {
+              progressStatus.innerHTML = '<i class="fa fa-exclamation-triangle mr-2 text-danger"></i> Sync Error';
+              if (stopBtn) stopBtn.classList.add('d-none');
+              if (progressBar) progressBar.className = "progress-bar bg-danger";
+              if (progressPercent) { progressPercent.classList.add('text-danger'); progressPercent.classList.remove('text-primary'); }
+              const errorNotice = document.getElementById('error-notice');
+              const errorNoticeText = document.getElementById('error-notice-text');
+              if (errorNotice && errorNoticeText && data.last_error) {
+                  errorNoticeText.innerText = data.last_error;
+                  errorNotice.classList.remove('d-none');
+              }
+              clearInterval(pollingInterval);
             } else if (data.status === 'cancelled') {
               progressStatus.innerHTML = '<i class="fa fa-ban mr-2 text-danger"></i> Search cancelled';
               if (stopBtn) stopBtn.classList.add('d-none');
