@@ -197,7 +197,7 @@
                     <div class="card h-100 border-0 shadow-sm reel-card overflow-hidden" style="border-radius: 12px; transition: transform 0.3s ease;">
                       <div class="position-relative aspect-9-16 bg-black" style="aspect-ratio: 9/16; overflow: hidden;">
                         {% if reel.thumbnail_url %}
-                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
+                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
                         {% endif %}
                         <div class="card-img-overlay d-flex flex-column justify-content-between p-3" style="background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.8) 100%);">
                             <div class="text-right">
@@ -215,13 +215,16 @@
                                     <button type="button" class="btn btn-white btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; padding: 0;"
                                             data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
                                             data-play-title="{{ reel.title or reel.shortcode or 'Reel' }}"
-                                            data-play-poster="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
+                                            data-play-poster="{{ url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
                                             data-shortcode="{{ reel.shortcode or '' }}"
                                             onclick="openPreviewFromButton(this)">
                                         <i class="fa fa-play ml-1"></i>
                                     </button>
                                     <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; padding: 0;" title="Download MP4">
                                         <i class="fa fa-download"></i>
+                                    </a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-circle shadow-sm ml-1" style="width: 32px; height: 32px; padding: 0;" title="See on IG">
+                                        <i class="fa fa-instagram"></i>
                                     </a>
                                 </div>
                             </div>
@@ -258,7 +261,7 @@
                             <tr>
                                 <td class="px-4">
                                     <div class="d-flex align-items-center py-2">
-                                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;" loading="lazy">
+                                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;" loading="lazy">
                                         <div style="max-width: 300px;" class="text-truncate font-weight-bold">{{ reel.title or reel.shortcode }}</div>
                                     </div>
                                 </td>
@@ -271,7 +274,8 @@
                                 </td>
                                 <td class="text-right px-4">
                                     <a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-line-chart"></i></a>
-                                    <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg"><i class="fa fa-download"></i></a>
+                                    <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-download"></i></a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-lg" title="See on IG"><i class="fa fa-instagram"></i></a>
                                 </td>
                             </tr>
                             {% endfor %}

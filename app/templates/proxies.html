@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow-sm border-0 h-100" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <h4 class="font-weight-bold mb-3">Add Proxies</h4>
+                <p class="text-muted small mb-4">Paste your proxies below. Formats supported:<br>
+                    <code>host:port:user:pass</code><br>
+                    <code>user:pass@host:port</code><br>
+                    <code>host:port</code>
+                </p>
+                
+                <form action="{{ url_for('main.add_proxies') }}" method="POST">
+                    <div class="form-group">
+                        <label class="small font-weight-bold">Group Name</label>
+                        <input type="text" name="group_name" class="form-control" placeholder="e.g. Residential, Mobile" list="group-list">
+                        <datalist id="group-list">
+                            {% for group in grouped_proxies.keys() %}
+                            <option value="{{ group }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label class="small font-weight-bold">Proxy List (One per line)</label>
+                        <textarea name="proxy_list" class="form-control" rows="10" placeholder="1.2.3.4:8080:user:pass" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block font-weight-bold py-2 mt-3" style="background: #3b82f6; border: none; border-radius: 10px;">Import Proxies</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 mb-4" style="border-radius: 16px;">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h4 class="font-weight-bold m-0">Proxy Management</h4>
+                    <div class="d-flex">
+                        <form action="{{ url_for('main.clear_failed_proxies') }}" method="POST" class="mr-2" onsubmit="return confirm('This will reset all failure counts and reactivate proxies. Continue?')">
+                            <button type="submit" class="btn btn-outline-warning btn-sm rounded-pill px-3">
+                                <i class="fa fa-refresh mr-1"></i> Reset Fails
+                            </button>
+                        </form>
+                        <form action="{{ url_for('main.delete_all_proxies') }}" method="POST" onsubmit="return confirm('CRITICAL: This will delete EVERY proxy in your database. Are you sure?')">
+                            <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-3">
+                                <i class="fa fa-trash-o mr-1"></i> Delete All
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                {% if not grouped_proxies %}
+                <div class="text-center py-5">
+                    <div class="mb-3 text-muted" style="font-size: 3rem;"><i class="fa fa-shield"></i></div>
+                    <h5>No proxies found</h5>
+                    <p class="text-muted">Upload some proxies on the left to start searching safely.</p>
+                </div>
+                {% else %}
+                
+                <div class="accordion" id="proxyAccordion">
+                    {% for group, proxies in grouped_proxies.items() %}
+                    <div class="card border mb-2" style="border-radius: 12px; overflow: hidden;">
+                        <div class="card-header bg-white p-3" id="heading{{ loop.index }}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="cursor-pointer flex-grow-1" data-toggle="collapse" data-target="#collapse{{ loop.index }}">
+                                    <h6 class="m-0 font-weight-bold">
+                                        <i class="fa fa-folder-open-o mr-2 text-primary"></i> {{ group }} 
+                                        <span class="badge badge-light ml-2">{{ proxies|length }} proxies</span>
+                                    </h6>
+                                </div>
+                                <div class="d-flex align-items-center">
+                                    <form action="{{ url_for('main.delete_proxy_group', group_name=group) }}" method="POST" class="mr-3" onsubmit="return confirm('Delete all proxies in group \'{{ group }}\'?')">
+                                        <button type="submit" class="btn btn-link text-danger p-0" title="Delete Group">
+                                            <i class="fa fa-trash-o"></i>
+                                        </button>
+                                    </form>
+                                    <i class="fa fa-chevron-down text-muted small cursor-pointer" data-toggle="collapse" data-target="#collapse{{ loop.index }}"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="collapse{{ loop.index }}" class="collapse {% if loop.first %}show{% endif %}" data-parent="#proxyAccordion">
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0" style="font-size: 0.85rem;">
+                                        <thead class="bg-light">
+                                            <tr>
+                                                <th class="border-0 pl-4">Proxy URL</th>
+                                                <th class="border-0">Status</th>
+                                                <th class="border-0 text-center">Fails</th>
+                                                <th class="border-0 text-right pr-4">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for p in proxies %}
+                                            <tr id="proxy-row-{{ p.id }}" class="{% if not p.is_active %}table-light text-muted{% endif %}">
+                                                <td class="pl-4 font-italic">{{ p.url|truncate(50) }}</td>
+                                                <td>
+                                                    {% if p.is_active %}
+                                                    <span class="badge badge-success px-2 py-1" style="border-radius: 5px;">Active</span>
+                                                    {% else %}
+                                                    <span class="badge badge-danger px-2 py-1" style="border-radius: 5px;">Disabled</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-center">{{ p.fail_count }}</td>
+                                                <td class="text-right pr-4">
+                                                    <button onclick="toggleProxy({{ p.id }})" class="btn btn-sm {% if p.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %} mr-1" title="Toggle Status">
+                                                        <i class="fa {% if p.is_active %}fa-pause{% else %}fa-play{% endif %}"></i>
+                                                    </button>
+                                                    <button onclick="deleteProxy({{ p.id }})" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="fa fa-trash"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+function toggleProxy(id) {
+    fetch(`/proxies/toggle/${id}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            }
+        });
+}
+
+function deleteProxy(id) {
+    if (!confirm('Are you sure you want to delete this proxy?')) return;
+    
+    fetch(`/proxies/delete/${id}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                document.getElementById(`proxy-row-${id}`).remove();
+            }
+        });
+}
+</script>
+<style>
+.cursor-pointer { cursor: pointer; }
+.card-header[data-toggle="collapse"].collapsed .fa-chevron-down { transform: rotate(-90deg); }
+.fa-chevron-down { transition: transform 0.2s; }
+</style>
+{% endblock %}

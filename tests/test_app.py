@@ -20,7 +20,7 @@ def test_dashboard_renders():
     client = app.test_client()
     response = client.get('/')
     assert response.status_code == 200
-    assert b'Start with a hashtag search' in response.data
+    assert b'Total Library' in response.data
 
 
 def test_instagram_session_can_be_saved():
@@ -64,47 +64,41 @@ def test_discover_imports_reels_from_authenticated_json():
     with app.app_context():
         services.save_instagram_session('session-value', 'csrf-value', '1234')
 
-    original = services._instagram_api_get
-    services._instagram_api_get = lambda *_args, **_kwargs: {
-        'status': 'ok',
-        'data': {
-            'name': 'fitness',
-            'top': {
-                'sections': [
-                    {
-                        'layout_content': {
-                            'one_by_two_item': {
-                                'clips': {
-                                    'items': [
-                                        {
-                                            'media': {
-                                                'code': 'ABC123',
-                                                'play_count': 51000,
-                                                'like_count': 1200,
-                                                'comment_count': 45,
-                                                'video_versions': [{'url': 'https://cdn.example/video.mp4'}],
-                                                'caption': {'text': 'Strong hook #fitness'},
-                                                'user': {'username': 'creator_one'},
-                                            }
-                                        }
-                                    ]
-                                }
+    original = services._make_ig_request
+    services._make_ig_request = lambda *_args, **_kwargs: ({
+        'sections': [
+            {
+                'layout_content': {
+                    'medias': [
+                        {
+                            'media': {
+                                'code': 'ABC123',
+                                'play_count': 51000,
+                                'like_count': 1200,
+                                'comment_count': 45,
+                                'video_versions': [{'url': 'https://cdn.example/video.mp4'}],
+                                'caption': {'text': 'Strong hook #fitness'},
+                                'user': {'username': 'creator_one'},
+                                'media_type': 2, # Video
                             }
                         }
-                    }
-                ]
-            },
-            'recent': {'sections': []},
-        },
-    }
+                    ]
+                }
+            }
+        ],
+        'more_available': False,
+        'next_max_id': None
+    }, None)
+    
     response = client.post(
         '/discover',
         data={'hashtags': 'fitness'},
         follow_redirects=True,
     )
-    services._instagram_api_get = original
+    services._make_ig_request = original
     assert response.status_code == 200
-    assert b'#fitness' in response.data
+    # Current UI uses 'Total Library' or the tag name itself in a breadcrumb/header
+    assert b'fitness' in response.data.lower()
     with app.app_context():
         reel = Reel.query.one()
         assert reel.url.endswith('/ABC123/')

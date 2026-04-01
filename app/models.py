@@ -119,3 +119,13 @@ class TaskNotification(db.Model):
     action_url = db.Column(db.String(500))
     is_read = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ProxyRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    url = db.Column(db.String(500), unique=True, nullable=False)
+    group_name = db.Column(db.String(120), default='Default', index=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    fail_count = db.Column(db.Integer, default=0, nullable=False)
+    last_used_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)

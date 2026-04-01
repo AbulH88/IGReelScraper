@@ -11,10 +11,16 @@
         <h2 class="font-weight-bold mb-2">Instagram Creator Search</h2>
         <p class="text-muted mb-4">Analyze any public profile. Track reels, posts, and engagement metrics anonymously.</p>
         <div class="d-flex justify-content-center">
-            <form method="post" action="{{ url_for('main.creator_search') }}" class="d-flex align-items-center w-100" style="max-width: 600px;">
+            <form method="post" action="{{ url_for('main.creator_search') }}" class="w-100" style="max-width: 600px;">
               <div class="input-group input-group-lg shadow-sm" style="border-radius: 50px; overflow: hidden; border: 1px solid #e1e8f0;">
                 <span class="input-group-text bg-white border-0 pl-4 text-muted"><i class="fa fa-at"></i></span>
                 <input type="text" name="username" class="form-control border-0 py-4" placeholder="username or profile URL" required style="font-size: 1.1rem; box-shadow: none;">
+                <select name="media_type" class="form-control border-0 bg-light text-muted small" style="max-width: 120px; font-size: 0.9rem; border-left: 1px solid #eee !important;">
+                    <option value="all">All Media</option>
+                    <option value="video">Videos</option>
+                    <option value="image">Images</option>
+                    <option value="carousel">Carousels</option>
+                </select>
                 <button type="submit" class="btn btn-primary px-5 font-weight-bold" style="background: #3b82f6; border: none; border-radius: 0 50px 50px 0;">Analyze</button>
               </div>
             </form>
@@ -100,6 +106,7 @@
                     <form method="post" action="{{ url_for('main.creator_search') }}">
                       <input type="hidden" name="username" value="{{ creator.username }}">
                       <input type="hidden" name="max_id" value="{{ creator.next_max_id }}">
+                      <input type="hidden" name="media_type" value="all">
                       <button type="submit" class="btn btn-sm btn-outline-primary px-3 rounded-pill">
                         <i class="fa fa-plus mr-1"></i> Scroll
                       </button>
@@ -108,6 +115,7 @@
                     <form method="post" action="{{ url_for('main.creator_search') }}">
                       <input type="hidden" name="username" value="{{ creator.username }}">
                       <input type="hidden" name="max_id" value="{{ creator.next_max_id }}">
+                      <input type="hidden" name="media_type" value="all">
                       <button type="submit" class="btn btn-sm btn-danger px-3 rounded-pill">
                         <i class="fa fa-refresh"></i> Retry
                       </button>
@@ -147,12 +155,31 @@
                                 {% if profile_data and profile_data.is_verified %}
                                 <span class="badge badge-primary rounded-circle p-1" style="background: #0095f6; width: 24px; height: 24px;"><i class="fa fa-check text-white" style="font-size: 14px;"></i></span>
                                 {% endif %}
-                                <div class="ml-auto mt-3 mt-md-0">
-                                    <form method="post" action="{{ url_for('main.refresh_hashtag_group', hashtag='creator:' ~ active_creator) }}">
-                                        <button type="submit" class="btn btn-outline-dark rounded-pill px-4 btn-sm" onclick="return confirm('Deep analyze all reels?')">Deep Refresh</button>
-                                        <a href="https://instagram.com/{{ active_creator }}" target="_blank" class="btn btn-primary rounded-pill px-4 btn-sm ml-2" style="background: #3b82f6; border: none;">Open Instagram</a>
-                                    </form>
+                                <div class="ml-auto mt-3 mt-md-0 d-flex flex-wrap align-items-center justify-content-center justify-content-md-end">
+                                   <form method="post" action="{{ url_for('main.creator_search') }}" class="d-flex align-items-center mb-2 mb-md-0 mr-md-2">
+                                       <input type="hidden" name="username" value="{{ active_creator }}">
+                                       <input type="hidden" name="max_id" value="{{ stats.next_max_id }}">
+                                       <div class="input-group input-group-sm mr-2 shadow-sm" style="width: auto; border-radius: 20px; overflow: hidden; border: 1px solid #dee2e6;">
+                                           <select name="media_type" class="form-control border-0 bg-white" style="font-size: 0.75rem;">
+                                               <option value="all">All</option>
+                                               <option value="video">Videos</option>
+                                               <option value="image">Images</option>
+                                               <option value="carousel">Carousels</option>
+                                           </select>
+                                           <div class="input-group-append">
+                                               <button type="submit" class="btn btn-primary border-0" style="background: #3b82f6;">
+                                                   <i class="fa fa-plus mr-1"></i> Scroll More
+                                               </button>
+                                           </div>
+                                       </div>
+                                   </form>
+
+                                   <form method="post" action="{{ url_for('main.refresh_hashtag_group', hashtag='creator:' ~ active_creator) }}" class="d-flex align-items-center">
+                                       <button type="submit" class="btn btn-outline-dark rounded-pill px-3 btn-sm" onclick="return confirm('Deep analyze all reels?')">Deep Refresh</button>
+                                       <a href="https://instagram.com/{{ active_creator }}" target="_blank" class="btn btn-primary rounded-pill px-3 btn-sm ml-2" style="background: #3b82f6; border: none;">Open Instagram</a>
+                                   </form>
                                 </div>
+
                             </div>
                             
                             <div class="row mb-4 no-gutters justify-content-center justify-content-md-start">
@@ -280,7 +307,7 @@
                     <div class="card h-100 border-0 shadow-sm reel-card overflow-hidden" style="border-radius: 12px; transition: transform 0.3s ease;">
                       <div class="position-relative aspect-9-16 bg-black" style="aspect-ratio: 9/16; overflow: hidden;">
                         {% if reel.thumbnail_url %}
-                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
+                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
                         {% endif %}
                         <div class="card-img-overlay d-flex flex-column justify-content-between p-3" style="background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.8) 100%);">
                             <div class="text-right">
@@ -292,13 +319,16 @@
                                     <button type="button" class="btn btn-white btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; padding: 0;"
                                             data-play-url="{{ url_for('main.stream_reel_video', reel_id=reel.id) }}"
                                             data-play-title="{{ reel.title or reel.shortcode or 'Reel' }}"
-                                            data-play-poster="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
+                                            data-play-poster="{{ url_for('main.proxy_image', url=reel.thumbnail_url) if reel.thumbnail_url else '' }}"
                                             data-shortcode="{{ reel.shortcode or '' }}"
                                             onclick="openPreviewFromButton(this)">
                                         <i class="fa fa-play ml-1"></i>
                                     </button>
                                     <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; padding: 0;" title="Download MP4">
                                         <i class="fa fa-download"></i>
+                                    </a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-circle shadow-sm ml-1" style="width: 32px; height: 32px; padding: 0;" title="See on IG">
+                                        <i class="fa fa-instagram"></i>
                                     </a>
                                 </div>
                             </div>
@@ -335,7 +365,7 @@
                             <tr>
                                 <td class="px-4">
                                     <div class="d-flex align-items-center py-2">
-                                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;">
+                                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;" loading="lazy">
                                         <div style="max-width: 300px;" class="text-truncate font-weight-bold">{{ reel.title or reel.shortcode }}</div>
                                     </div>
                                 </td>
@@ -347,7 +377,8 @@
                                 </td>
                                 <td class="text-right px-4">
                                     <a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-line-chart"></i></a>
-                                    <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg"><i class="fa fa-download"></i></a>
+                                    <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-download"></i></a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-lg" title="See on IG"><i class="fa fa-instagram"></i></a>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -383,7 +414,7 @@
                     <div class="card h-100 border-0 shadow-sm reel-card overflow-hidden" style="border-radius: 12px; transition: transform 0.3s ease;">
                       <div class="position-relative aspect-9-16 bg-black" style="aspect-ratio: 9/16; overflow: hidden;">
                         {% if reel.thumbnail_url %}
-                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
+                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="w-100 h-100" style="object-fit: cover; opacity: 0.9;" loading="lazy" referrerpolicy="no-referrer">
                         {% endif %}
                         <div class="card-img-overlay d-flex flex-column justify-content-between p-3" style="background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 40%, rgba(0,0,0,0.8) 100%);">
                             <div class="d-flex justify-content-between align-items-start">
@@ -414,6 +445,9 @@
                                     {% endif %}
                                     <a href="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" target="_blank" class="btn btn-light btn-sm rounded-circle shadow-sm" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;" title="View Image">
                                         <i class="fa fa-image"></i>
+                                    </a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-circle shadow-sm ml-1" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;" title="See on IG">
+                                        <i class="fa fa-instagram"></i>
                                     </a>
                                 </div>
                             </div>
@@ -451,7 +485,7 @@
                             <tr>
                                 <td class="px-4">
                                     <div class="d-flex align-items-center py-2">
-                                        <img src="{{ url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')) if reel.local_thumb_path else url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;">
+                                        <img src="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" class="rounded shadow-sm mr-3" style="width: 48px; height: 48px; object-fit: cover;" loading="lazy">
                                         <div style="max-width: 300px;" class="text-truncate font-weight-bold">{{ reel.title or reel.shortcode }}</div>
                                     </div>
                                 </td>
@@ -468,7 +502,8 @@
                                 </td>
                                 <td class="text-right px-4">
                                     <a href="{{ url_for('main.reel_detail', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-line-chart"></i></a>
-                                    <a href="{{ url_for('main.proxy_image', url=reel.thumbnail_url) }}" target="_blank" class="btn btn-light btn-sm rounded-lg"><i class="fa fa-image"></i></a>
+                                    <a href="{{ url_for('main.download_reel', reel_id=reel.id) }}" class="btn btn-light btn-sm rounded-lg mr-1"><i class="fa fa-download"></i></a>
+                                    <a href="{{ reel.url }}" target="_blank" class="btn btn-light btn-sm rounded-lg" title="See on IG"><i class="fa fa-instagram"></i></a>
                                 </td>
                             </tr>
                             {% endfor %}

@@ -36,7 +36,8 @@ def normalize_hashtags(raw: str) -> list[str]:
     for part in re.split(r"[\s,]+", raw or ""):
         # Remove all special characters (keep letters, numbers, underscores)
         cleaned = re.sub(r"[^\w]", "", part.lower())
-        if cleaned and cleaned not in seen:
+        # Skip tags shorter than 2 characters (like 'e') to prevent API errors and irrelevant results
+        if cleaned and len(cleaned) >= 2 and cleaned not in seen:
             seen.add(cleaned)
             tags.append(cleaned)
     return tags
@@ -160,6 +161,9 @@ def _instagram_api_get(path: str, *, referer: str | None = None, retries: int = 
     
     for attempt in range(retries):
         proxy = proxy_manager.get_random_proxy()
+        if not proxy:
+            raise Exception("Proxy expired or no active proxies available. Please upload new proxies in the Proxy menu.")
+            
         try:
             response = requests.get(
                 path,
@@ -171,18 +175,20 @@ def _instagram_api_get(path: str, *, referer: str | None = None, retries: int = 
             )
             
             if response.status_code == 429:
-                proxy_manager.mark_bad(proxy, is_rate_limit=True)
+                proxy_manager.report_fail(proxy)
                 time.sleep(random.uniform(5, 10))
                 continue
                 
             response.raise_for_status()
+            proxy_manager.report_success(proxy)
             payload = response.json()
             if payload.get("status") == "fail":
                 last_error = payload.get("message", "Instagram API request failed.")
                 continue
             return payload
         except Exception as e:
-            proxy_manager.mark_bad(proxy)
+            if proxy:
+                proxy_manager.report_fail(proxy)
             last_error = str(e)
             time.sleep(random.uniform(2, 4))
             
@@ -363,13 +369,14 @@ def discover_reels_for_hashtag(hashtag: str, max_id: str | None = None, app_cont
                 found_in_batch += 1
         
         db.session.commit()
-        
+
         if app_context:
+            # Trigger background download for ALL reels found
             for rid in set(reels_to_download):
                 worker_pool.submit(download_media, rid, app_context)
+            # Also enrich them to get full metadata/fresh URLs
             for rid in set(reels_to_enrich):
                 worker_pool.submit(_deep_enrich_task, rid, app_context)
-        
         # Paging for Sections API
         current_max_id = payload.get("next_max_id")
         more = payload.get("more_available", False)
@@ -755,6 +762,7 @@ def get_user_info(username: str) -> tuple[dict | None, str | None]:
         stats.following_count = data.get("following_count")
         stats.posts_count = data.get("posts_count")
         stats.is_verified = data.get("is_verified", False)
+        stats.updated_at = datetime.now(timezone.utc)
         db.session.add(stats)
         db.session.commit()
         
@@ -888,38 +896,46 @@ def _make_ig_request(url, headers, cookies, params=None, data=None, method="GET"
     """Internal helper to make IG requests with retries and proxy rotation."""
     payload = None
     last_exc = None
+
     # Safe helpers for logging
     def _proxy_label(p): return p.split('@')[-1] if p and '@' in p else (p or 'direct')
     def _url_label(u): parts = u.split('/v1/'); return parts[1] if len(parts) > 1 else u.split('/')[-2]
+
     for retry in range(3):
         proxy = None
         try:
             proxy = proxy_manager.get_random_proxy()
+            if not proxy:
+                return None, Exception("Proxy expired or no active proxies available. Please upload new proxies in the Proxy menu.")
+
             if method == "GET":
                 resp = requests.get(url, headers=headers, cookies=cookies, params=params, proxy=proxy, impersonate="chrome131", timeout=15)
             else:
                 resp = requests.post(url, headers=headers, cookies=cookies, data=data, proxy=proxy, impersonate="chrome131", timeout=15)
-            
+
             if resp.status_code == 200:
+                proxy_manager.report_success(proxy)
                 print(f"SUCCESS: {method} {_url_label(url)} via {_proxy_label(proxy)}")
                 return resp.json(), None
 
             if resp.status_code == 429:
-                proxy_manager.mark_bad(proxy, is_rate_limit=True)
+                proxy_manager.report_fail(proxy)
                 print(f"RETRY: Rate limited (429) on proxy {_proxy_label(proxy)}. Retry {retry+1}/3")
                 time.sleep(2)
                 continue
-            
+
             resp.raise_for_status()
+            proxy_manager.report_success(proxy)
             return resp.json(), None
         except Exception as e:
-            if proxy: proxy_manager.mark_bad(proxy)
+            if proxy: 
+                proxy_manager.report_fail(proxy)
             print(f"RETRY: Request failed: {e}. Retry {retry+1}/3")
             last_exc = e
             time.sleep(0.5)
-    return None, last_exc
 
-def discover_reels_direct(username: str, max_id: str | None = None, app_context=None) -> tuple[int, list[str], list[Reel], str | None]:
+    return None, last_exc
+def discover_reels_direct(username: str, max_id: str | None = None, app_context=None, media_type_filter: str = 'all') -> tuple[int, list[str], list[Reel], str | None]:
     """
     Fetch all media (images, reels, carousels) directly from Instagram API.
     Uses both feed and clips endpoints to ensure 100% coverage.
@@ -963,6 +979,10 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
     feed_next_max_id = None
     
     for url in endpoints:
+        # Optimization: Skip clips endpoint if user only wants images
+        if media_type_filter == 'image' and "clips" in url:
+            continue
+            
         current_max_id = max_id if url == endpoints[0] else None # Reset max_id for second endpoint
         is_clips = "clips" in url
         
@@ -1004,6 +1024,15 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                 # If it's a video, check if it's a Reel (clips)
                 is_reel = is_clips or (m_type == "video" and media.get("is_dash_eligible"))
                 
+                # Apply Media Type Filter
+                if media_type_filter != 'all':
+                    if media_type_filter == 'video' and not is_reel:
+                        continue
+                    if media_type_filter == 'image' and m_type != 'image':
+                        continue
+                    if media_type_filter == 'carousel' and m_type != 'carousel':
+                        continue
+
                 if is_reel:
                     full_url = f"{INSTAGRAM_BASE}/reel/{code}/"
                     m_type = "video"
@@ -1067,13 +1096,14 @@ def discover_reels_direct(username: str, max_id: str | None = None, app_context=
                 imported += 1
             
             db.session.commit()
-            
+
             if app_context:
+                # Trigger background download for ALL reels found
                 for rid in set(reels_to_download):
                     worker_pool.submit(download_media, rid, app_context)
+                # Also enrich them to get full metadata/fresh URLs
                 for rid in set(reels_to_enrich):
                     worker_pool.submit(_deep_enrich_task, rid, app_context)
-            
             # Paging
             if is_clips:
                 p_info = payload.get("paging_info", {})

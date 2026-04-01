@@ -7,6 +7,7 @@ import threading
 from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, stream_with_context, url_for
 from sqlalchemy import or_
 
+from sqlalchemy.exc import IntegrityError
 from .models import HashtagSearchState, Reel, TaskNotification, db
 from .services import (
     _instagram_cookies,
@@ -35,31 +36,50 @@ def _to_int(name: str):
     return int(value) if value else None
 
 
+def _get_or_create_hashtag_state(hashtag: str) -> HashtagSearchState:
+    """Safely get or create a HashtagSearchState record to prevent race condition IntegrityErrors."""
+    state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+    if not state:
+        try:
+            state = HashtagSearchState(hashtag=hashtag)
+            db.session.add(state)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
+    return state
+
+
 @bp.route('/hashtag-search', methods=['GET', 'POST'])
 def hashtag_search():
     if request.method == 'POST':
-        hashtag = request.form.get('hashtag', '').strip()
-        if not hashtag:
+        raw_hashtag = request.form.get('hashtag', '').strip()
+        if not raw_hashtag:
             flash('Hashtag is required', 'danger')
             return redirect(url_for('main.hashtag_search'))
         
-        if not hashtag.startswith('#'):
-            hashtag = f"#{hashtag}"
+        hashtags = normalize_hashtags(raw_hashtag)
+        if not hashtags:
+            flash('Enter at least one valid hashtag (min 2 characters)', 'warning')
+            return redirect(url_for('main.hashtag_search'))
             
-        # Check if already scrolling
-        state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
-        if state and state.status == 'scrolling':
-            flash(f'Already searching {hashtag}. Please wait.', 'warning')
-            return redirect(url_for('main.hashtag_search', active_hashtag=hashtag))
-            
-        # Start background search
-        threading.Thread(
-            target=async_scroll_hashtag, 
-            args=(current_app._get_current_object(), hashtag)
-        ).start()
+        for tag_name in hashtags:
+            hashtag = f"#{tag_name}"
+                
+            # Check if already scrolling
+            state = _get_or_create_hashtag_state(hashtag)
+            if state.status == 'scrolling':
+                continue # Skip if already in progress
+                
+            # Start background search
+            threading.Thread(
+                target=async_scroll_hashtag, 
+                args=(current_app._get_current_object(), hashtag)
+            ).start()
         
-        flash(f'Started search for {hashtag} in the background.', 'success')
-        return redirect(url_for('main.hashtag_search', active_hashtag=hashtag))
+        active_hashtag = f"#{hashtags[0]}"
+        flash(f'Started search for {len(hashtags)} hashtag(s) in the background.', 'success')
+        return redirect(url_for('main.hashtag_search', active_hashtag=active_hashtag))
 
     active_hashtag = request.args.get('active_hashtag', '')
     limit = request.args.get('limit', type=int) or 200
@@ -89,11 +109,7 @@ def hashtag_search():
     
     if active_hashtag:
         tag = active_hashtag if active_hashtag.startswith('#') else f"#{active_hashtag}"
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if not state:
-            state = HashtagSearchState(hashtag=tag)
-            db.session.add(state)
-            db.session.commit()
+        state = _get_or_create_hashtag_state(tag)
             
         base_query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")), Reel.media_type == 'video')
         total_count = base_query.count()
@@ -169,10 +185,7 @@ def async_scroll_hashtag(app, hashtag):
         from .models import db, Reel, HashtagSearchState
         from .services import discover_reels_for_hashtag
         
-        state = HashtagSearchState.query.filter_by(hashtag=hashtag).first()
-        if not state:
-            state = HashtagSearchState(hashtag=hashtag)
-            db.session.add(state)
+        state = _get_or_create_hashtag_state(hashtag)
         
         state.status = 'scrolling'
         state.last_error = None
@@ -253,7 +266,10 @@ def proxy_image():
     from .models import Reel
     reel = Reel.query.filter_by(thumbnail_url=url).first()
     if reel and reel.local_thumb_path:
-        return redirect(url_for('main.serve_media', filename=reel.local_thumb_path.replace('media/', '')))
+        media_path = os.path.join(current_app.instance_path, 'media')
+        filename = reel.local_thumb_path.replace('media/', '')
+        if os.path.exists(os.path.join(media_path, filename)):
+            return redirect(url_for('main.serve_media', filename=filename))
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -261,25 +277,27 @@ def proxy_image():
     }
 
     try:
-        # First try without proxy for speed, many CDNs don't block simple GETs
-        resp = requests.get(url, headers=headers, timeout=5, stream=True)
+        # Strict Proxy Enforcement: Every request must go through a proxy
+        proxies = proxy_manager.get_requests_proxy()
+        if not proxies:
+            # If no proxies, we don't want to leak IP, but we can't show image.
+            # Return a placeholder or 403.
+            abort(403, description="No active proxies available to fetch image.")
+
+        resp = requests.get(url, headers=headers, proxies=proxies, timeout=10, stream=True)
         if resp.status_code == 200:
+            proxy_manager.report_success(proxies.get('http'))
             return Response(
                 stream_with_context(resp.iter_content(chunk_size=10240)),
                 content_type=resp.headers.get('Content-Type')
             )
-
-        # If blocked, try with proxy
-        proxies = proxy_manager.get_requests_proxy()
-        resp = requests.get(url, headers=headers, proxies=proxies, timeout=10, stream=True)
+        
+        proxy_manager.report_fail(proxies.get('http'))
         resp.raise_for_status()
-        return Response(
-            stream_with_context(resp.iter_content(chunk_size=10240)),
-            content_type=resp.headers.get('Content-Type')
-        )
     except Exception as e:
-        # Final fallback: redirect to the URL and hope the browser can handle it
-        return redirect(url)
+        # If proxy fails, don't redirect to direct URL (leaks IP)
+        # Instead, return a 404 or a placeholder
+        abort(404, description=f"Proxy failed to fetch image: {str(e)}")
 
 @bp.route('/library')
 def library():
@@ -352,6 +370,111 @@ def instagram_session():
     )
 
 
+@bp.route('/proxies', methods=['GET'])
+def list_proxies():
+    from .models import ProxyRecord
+    proxies = ProxyRecord.query.order_by(ProxyRecord.group_name, ProxyRecord.created_at.desc()).all()
+    
+    # Group them for the UI
+    grouped = {}
+    for p in proxies:
+        if p.group_name not in grouped:
+            grouped[p.group_name] = []
+        grouped[p.group_name].append(p)
+        
+    return render_template('proxies.html', grouped_proxies=grouped)
+
+
+@bp.route('/proxies/add', methods=['POST'])
+def add_proxies():
+    from .models import ProxyRecord, db
+    raw_data = request.form.get('proxy_list', '').strip()
+    group_name = request.form.get('group_name', 'Default').strip() or 'Default'
+    
+    if not raw_data:
+        flash('No proxy data provided.', 'warning')
+        return redirect(url_for('main.list_proxies'))
+        
+    added = 0
+    skipped = 0
+    for line in raw_data.splitlines():
+        line = line.strip()
+        if not line: continue
+        
+        # Format normalization
+        proxy_url = None
+        parts = line.split(':')
+        if len(parts) == 4:
+            host, port, user, password = parts
+            proxy_url = f"http://{user}:{password}@{host}:{port}"
+        elif '@' in line:
+            proxy_url = f"http://{line}" if not line.startswith('http') else line
+        elif len(parts) == 2:
+            host, port = parts
+            proxy_url = f"http://{host}:{port}"
+            
+        if proxy_url:
+            existing = ProxyRecord.query.filter_by(url=proxy_url).first()
+            if not existing:
+                db.session.add(ProxyRecord(url=proxy_url, group_name=group_name))
+                added += 1
+            else:
+                skipped += 1
+                
+    db.session.commit()
+    flash(f"Added {added} new proxies. (Skipped {skipped} duplicates)", "success")
+    return redirect(url_for('main.list_proxies'))
+
+
+@bp.route('/proxies/delete/<int:proxy_id>', methods=['POST'])
+def delete_proxy(proxy_id):
+    from .models import ProxyRecord, db
+    proxy = ProxyRecord.query.get_or_404(proxy_id)
+    db.session.delete(proxy)
+    db.session.commit()
+    return jsonify({'status': 'success'})
+
+
+@bp.route('/proxies/toggle/<int:proxy_id>', methods=['POST'])
+def toggle_proxy(proxy_id):
+    from .models import ProxyRecord, db
+    proxy = ProxyRecord.query.get_or_404(proxy_id)
+    proxy.is_active = not proxy.is_active
+    db.session.commit()
+    return jsonify({'status': 'success', 'is_active': proxy.is_active})
+
+
+@bp.route('/proxies/clear-failed', methods=['POST'])
+def clear_failed_proxies():
+    from .models import ProxyRecord, db
+    # Either delete them or just reactivate them
+    failed = ProxyRecord.query.filter(ProxyRecord.fail_count > 0).all()
+    for p in failed:
+        p.fail_count = 0
+        p.is_active = True
+    db.session.commit()
+    flash(f"Reset {len(failed)} failed proxies to active status.", "success")
+    return redirect(url_for('main.list_proxies'))
+
+
+@bp.route('/proxies/delete-all', methods=['POST'])
+def delete_all_proxies():
+    from .models import ProxyRecord, db
+    num_deleted = ProxyRecord.query.delete()
+    db.session.commit()
+    flash(f"Successfully deleted all {num_deleted} proxies.", "success")
+    return redirect(url_for('main.list_proxies'))
+
+
+@bp.route('/proxies/delete-group/<string:group_name>', methods=['POST'])
+def delete_proxy_group(group_name):
+    from .models import ProxyRecord, db
+    num_deleted = ProxyRecord.query.filter_by(group_name=group_name).delete()
+    db.session.commit()
+    flash(f"Deleted {num_deleted} proxies from group '{group_name}'.", "success")
+    return redirect(url_for('main.list_proxies'))
+
+
 @bp.route('/discover', methods=['POST'])
 def discover():
     if not has_instagram_session():
@@ -366,7 +489,7 @@ def discover():
     imported, errors, search_state = import_discovered_reels(hashtags, depth=5)
     
     for tag, state in search_state.items():
-        record = HashtagSearchState.query.filter_by(hashtag=tag).first() or HashtagSearchState(hashtag=tag)
+        record = _get_or_create_hashtag_state(tag)
         record.next_max_id = state.get('next_max_id')
         record.more_available = bool(state.get('more_available'))
         db.session.add(record)
@@ -490,22 +613,19 @@ def stream_reel_video(reel_id: int):
     )
 
 
-def async_scroll_reels(app, username, max_id=None):
+def async_scroll_reels(app, username, max_id=None, media_type='all'):
     with app.app_context():
         from .models import db, Reel, HashtagSearchState, TaskNotification
         from .services import discover_reels_direct
         
         tag = f"creator:{username}"
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if not state:
-            state = HashtagSearchState(hashtag=tag)
-            db.session.add(state)
+        state = _get_or_create_hashtag_state(tag)
         
         state.status = 'scrolling'
         state.last_error = None
         db.session.commit()
         
-        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id, app_context=app)
+        imported, errors, new_reels, next_max_id = discover_reels_direct(username, max_id=max_id, app_context=app, media_type_filter=media_type)
         
         state.next_max_id = next_max_id
         state.more_available = bool(next_max_id)
@@ -539,6 +659,7 @@ def creator_search():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         max_id = request.form.get('max_id') # For continuing a scroll
+        media_type = request.form.get('media_type', 'all')
         
         if not username:
             flash('Enter an Instagram profile URL or username.', 'warning')
@@ -554,15 +675,15 @@ def creator_search():
         tag = f"creator:{clean_username}"
         
         # Check if already scrolling
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if state and state.status == 'scrolling':
+        state = _get_or_create_hashtag_state(tag)
+        if state.status == 'scrolling':
             flash(f'Already scrolling @{clean_username}. Please wait.', 'warning')
             return redirect(url_for('main.creator_search', active_creator=clean_username))
             
         # Start background scroll
         threading.Thread(
             target=async_scroll_reels, 
-            args=(current_app._get_current_object(), clean_username, max_id)
+            args=(current_app._get_current_object(), clean_username, max_id, media_type)
         ).start()
         
         flash(f'Started human-like scroll for @{clean_username} in the background.', 'success')
@@ -626,13 +747,22 @@ def creator_search():
     
     if active_creator:
         tag = f"creator:{active_creator}"
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if not state:
-            state = HashtagSearchState(hashtag=tag)
-            db.session.add(state)
-            db.session.commit()
+        state = _get_or_create_hashtag_state(tag)
             
         profile_data = CreatorStats.query.filter_by(username=active_creator).first()
+        
+        # LOCAL-FIRST: Only fetch from internet if profile is missing or older than 24h
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        should_fetch_profile = not profile_data or not profile_data.updated_at or (now - profile_data.updated_at.replace(tzinfo=timezone.utc)) > timedelta(hours=24)
+        
+        if should_fetch_profile:
+            print(f"DEBUG: Profile data missing or old for @{active_creator}. Fetching from IG...")
+            from .services import get_user_info
+            get_user_info(active_creator)
+            profile_data = CreatorStats.query.filter_by(username=active_creator).first()
+        else:
+            print(f"DEBUG: Using local profile data for @{active_creator}")
         
         from sqlalchemy import func, or_
         base_query = Reel.query.filter(or_(Reel.source_hashtag == tag, Reel.hashtags.like(f"%{tag}%")))
@@ -967,10 +1097,7 @@ def web_search():
         stats['playable_reels'] = sum(1 for r in all_group_reels if r.playable_url)
 
         # Ensure search state exists
-        state = HashtagSearchState.query.filter_by(hashtag=tag).first()
-        if not state:
-            db.session.add(HashtagSearchState(hashtag=tag))
-            db.session.commit()
+        state = _get_or_create_hashtag_state(tag)
 
     return render_template(
         'web_search.html',
